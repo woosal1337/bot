@@ -1,0 +1,10 @@
+[package]
+name = "bot-core"
+version = "1.0.0"
+edition.workspace = true
+rust-version = "1.88.0"
+authors = ["Bot contributors"]
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true

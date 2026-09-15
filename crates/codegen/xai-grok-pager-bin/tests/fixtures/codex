@@ -1,0 +1,456 @@
+#!/usr/bin/env perl
+# Modified by the Bot project on 2026-09-14: Codex provider protocol fixture.
+use strict;
+use warnings;
+use JSON::PP qw(decode_json encode_json);
+
+$| = 1;
+my $cwd;
+my $thread = 'bot-fixture-thread';
+my $turn = 'bot-fixture-turn';
+my $thread_index = 0;
+my $approval_thread;
+my $elicitation_thread;
+my $question_thread;
+my $dynamic_thread;
+my $repo_skill_enabled = JSON::PP::true();
+my $signed_in = $ENV{BOT_FIXTURE_SIGNED_OUT} ? JSON::PP::false() : JSON::PP::true();
+my $state_dir = $ENV{BOT_FIXTURE_STATE_DIR};
+my $login_delay = ($ENV{BOT_FIXTURE_LOGIN_DELAY_MS} // 100) / 1000;
+
+sub emit {
+    my ($payload) = @_;
+    print encode_json($payload), "\n";
+}
+
+while (my $line = <STDIN>) {
+    my $request = decode_json($line);
+    if (!exists $request->{method} && ($request->{id} // '') eq '700') {
+        open my $approval_file, '>', "$cwd/approval-response.json" or die $!;
+        print {$approval_file} encode_json($request->{result});
+        close $approval_file;
+        emit({ method => 'turn/completed', params => { threadId => $approval_thread, turn => { id => $turn, status => 'completed', items => [] } } });
+        next;
+    }
+    if (!exists $request->{method} && (($request->{id} // '') eq '701' || ($request->{id} // '') eq '702')) {
+        my $kind = $request->{id} eq '701' ? 'form' : 'url';
+        open my $elicitation_file, '>', "$cwd/mcp-$kind-response.json" or die $!;
+        print {$elicitation_file} encode_json($request->{result});
+        close $elicitation_file;
+        if ($request->{id} eq '702') {
+            emit({ method => 'mcpServer/oauthLogin/completed', params => { name => 'oauth-fixture', success => JSON::PP::true() } });
+        }
+        emit({ method => 'turn/completed', params => { threadId => $elicitation_thread, turn => { id => $turn, status => 'completed', items => [] } } });
+        next;
+    }
+    if (!exists $request->{method} && ($request->{id} // '') eq '703') {
+        open my $question_file, '>', "$cwd/request-user-input-response.json" or die $!;
+        print {$question_file} encode_json($request->{result});
+        close $question_file;
+        emit({ method => 'turn/completed', params => { threadId => $question_thread, turn => { id => $turn, status => 'completed', items => [] } } });
+        next;
+    }
+    if (!exists $request->{method} && ($request->{id} // '') eq '704') {
+        open my $dynamic_file, '>', "$cwd/dynamic-tool-response.json" or die $!;
+        print {$dynamic_file} encode_json($request->{result});
+        close $dynamic_file;
+        emit({ method => 'item/completed', params => { threadId => $dynamic_thread, turnId => $turn, item => { id => 'dynamic-fixture', type => 'dynamicToolCall', tool => 'lookup', namespace => 'records', arguments => { key => 'alpha' }, status => 'completed', success => $request->{result}{success}, contentItems => $request->{result}{contentItems}, durationMs => 8 } } });
+        emit({ method => 'turn/completed', params => { threadId => $dynamic_thread, turn => { id => $turn, status => 'completed', items => [] } } });
+        next;
+    }
+    next unless exists $request->{id};
+    my $method = $request->{method};
+    my $params = $request->{params};
+    my $result = {};
+    if ($method eq 'initialize') {
+        $result = { codexHome => '/tmp/bot-fixture', platformFamily => 'unix', platformOs => 'test', userAgent => 'bot-fixture' };
+    } elsif ($method eq 'account/read') {
+        $result = $signed_in
+            ? { requiresOpenaiAuth => JSON::PP::true(), account => { type => 'chatgpt', email => 'bot@example.com', planType => 'pro' } }
+            : { requiresOpenaiAuth => JSON::PP::true(), account => undef };
+    } elsif ($method eq 'account/login/start') {
+        if (defined $state_dir) {
+            open my $login_file, '>', "$state_dir/last-account-login.json" or die $!;
+            print {$login_file} encode_json($params);
+            close $login_file;
+        }
+        my $login_id = $params->{type} eq 'chatgptDeviceCode' ? 'fixture-device-login' : 'fixture-browser-login';
+        my $login_result = $params->{type} eq 'chatgptDeviceCode'
+            ? { type => 'chatgptDeviceCode', loginId => $login_id, verificationUrl => 'https://example.com/device', userCode => 'ABCD-EFGH' }
+            : { type => 'chatgpt', loginId => $login_id, authUrl => 'https://example.com/browser' };
+        emit({ id => $request->{id}, result => $login_result });
+        select undef, undef, undef, $login_delay;
+        $signed_in = JSON::PP::true();
+        emit({ method => 'account/login/completed', params => { loginId => $login_id, success => JSON::PP::true() } });
+        next;
+    } elsif ($method eq 'account/login/cancel') {
+        $result = { status => 'canceled' };
+    } elsif ($method eq 'account/logout') {
+        if (defined $state_dir) {
+            open my $logout_file, '>', "$state_dir/account-logout" or die $!;
+            close $logout_file;
+        }
+        $signed_in = JSON::PP::false();
+        $result = {};
+    } elsif ($method eq 'account/rateLimits/read') {
+        $result = {
+            rateLimits => {
+                limitId => 'codex',
+                limitName => 'Codex',
+                normalModelSlug => 'test-model',
+                planType => 'pro',
+                primary => { usedPercent => 37, windowDurationMins => 300, resetsAt => 1_789_238_400 },
+                secondary => { usedPercent => 8, windowDurationMins => 10_080, resetsAt => 1_789_843_200 },
+                credits => { hasCredits => JSON::PP::true(), unlimited => JSON::PP::false(), balance => '12.50' },
+            },
+            rateLimitsByLimitId => undef,
+            ordinaryUsageAllowed => JSON::PP::true(),
+            rateLimitResetCredits => { availableCount => 2, credits => undef },
+        };
+    } elsif ($method eq 'model/list') {
+        $result = { data => [{ id => 'test-model', model => 'test-model', displayName => 'Test model', description => 'Test fixture', isDefault => JSON::PP::true(), hidden => JSON::PP::false(), defaultReasoningEffort => 'low', supportedReasoningEfforts => [{ reasoningEffort => 'low', description => 'Low' }, { reasoningEffort => 'ultra', description => 'Ultra' }], inputModalities => ['text'], supportsPersonality => JSON::PP::false() }], nextCursor => undef };
+    } elsif ($method eq 'config/mcpServer/reload') {
+        open my $reload_file, '>', "$cwd/mcp-servers-reloaded" or die $!;
+        close $reload_file;
+        $result = {};
+    } elsif ($method eq 'mcpServerStatus/list') {
+        $result = {
+            data => [
+                {
+                    name => 'local-docs',
+                    authStatus => 'unsupported',
+                    pluginId => undef,
+                    runtimeStatus => 'connected',
+                    serverInfo => { name => 'docs', title => 'Documentation', version => '1.0.0' },
+                    tools => {
+                        read_docs => { name => 'read_docs', title => 'Read docs', description => 'Reads documentation', inputSchema => { type => 'object' } },
+                    },
+                    resources => [],
+                    resourceTemplates => [],
+                    toolsError => undef,
+                },
+                {
+                    name => 'plugin-search',
+                    authStatus => 'notLoggedIn',
+                    pluginId => 'search-plugin',
+                    runtimeStatus => 'authenticationRequired',
+                    serverInfo => undef,
+                    tools => {},
+                    resources => [],
+                    resourceTemplates => [],
+                    toolsError => undef,
+                },
+            ],
+            nextCursor => undef,
+        };
+    } elsif ($method eq 'hooks/list') {
+        my $hook_cwd = $params->{cwds}[0] // $cwd;
+        $result = {
+            data => [{
+                cwd => $hook_cwd,
+                hooks => [
+                    {
+                        key => 'project/pre-tool',
+                        eventName => 'preToolUse',
+                        matcher => 'shell',
+                        handlerType => 'command',
+                        command => "$hook_cwd/.codex/hooks/check",
+                        timeoutSec => 10,
+                        async => JSON::PP::false(),
+                        source => 'project',
+                        sourcePath => "$hook_cwd/.codex/config.toml",
+                        pluginId => undef,
+                        enabled => JSON::PP::true(),
+                        isManaged => JSON::PP::false(),
+                        trustStatus => 'trusted',
+                        currentHash => 'sha256:fixture',
+                        displayOrder => 0,
+                        statusMessage => undef,
+                        additionalContextLimit => undef,
+                    },
+                    {
+                        key => 'plugin/post-tool',
+                        eventName => 'postToolUse',
+                        matcher => undef,
+                        handlerType => 'mcpTool',
+                        server => 'docs',
+                        tool => 'record',
+                        timeoutSec => 15,
+                        source => 'plugin',
+                        sourcePath => "$hook_cwd/.codex/plugins/docs/plugin.json",
+                        pluginId => 'docs-plugin@fixture-marketplace',
+                        enabled => JSON::PP::false(),
+                        isManaged => JSON::PP::false(),
+                        trustStatus => 'untrusted',
+                        currentHash => 'sha256:plugin',
+                        displayOrder => 1,
+                        statusMessage => 'Disabled until trusted',
+                        additionalContextLimit => 2500,
+                    },
+                ],
+                errors => [],
+                warnings => [],
+            }],
+        };
+    } elsif ($method eq 'skills/list') {
+        my $skill_cwd = $params->{cwds}[0] // $cwd;
+        $result = {
+            data => [{
+                cwd => $skill_cwd,
+                skills => [
+                    {
+                        name => 'repo-skill',
+                        description => 'Checks the current repository',
+                        enabled => $repo_skill_enabled,
+                        path => "$skill_cwd/.agents/skills/repo-skill/SKILL.md",
+                        scope => 'repo',
+                        interface => {
+                            displayName => 'Repository check',
+                            shortDescription => 'Check this repository',
+                        },
+                        pluginId => undef,
+                        shortDescription => undef,
+                    },
+                    {
+                        name => 'plugin-skill',
+                        description => 'Reads plugin documentation',
+                        enabled => JSON::PP::true(),
+                        path => "$skill_cwd/.codex/plugins/docs/skills/plugin-skill/SKILL.md",
+                        scope => 'user',
+                        interface => undef,
+                        pluginId => 'docs-plugin@fixture-marketplace',
+                        shortDescription => 'Read plugin docs',
+                    },
+                ],
+                errors => [],
+            }],
+        };
+    } elsif ($method eq 'skills/config/write') {
+        open my $action_file, '>', "$cwd/last-skill-config-write.json" or die $!;
+        print {$action_file} encode_json($params);
+        close $action_file;
+        $repo_skill_enabled = $params->{enabled} ? JSON::PP::true() : JSON::PP::false();
+        $result = { effectiveEnabled => $repo_skill_enabled };
+    } elsif ($method eq 'plugin/list') {
+        $result = {
+            marketplaces => [{
+                name => 'fixture-marketplace',
+                path => "$cwd/.codex/marketplace.json",
+                plugins => [
+                    {
+                        id => 'docs-plugin@fixture-marketplace',
+                        name => 'docs-plugin',
+                        enabled => JSON::PP::true(),
+                        installed => JSON::PP::true(),
+                        localVersion => '1.2.3',
+                        version => undef,
+                        interface => {
+                            displayName => 'Docs plugin',
+                            shortDescription => 'Reads project documentation',
+                        },
+                        source => {
+                            type => 'local',
+                            path => "$cwd/.codex/plugins/docs",
+                        },
+                    },
+                    {
+                        id => 'unused-plugin@fixture-marketplace',
+                        name => 'unused-plugin',
+                        enabled => JSON::PP::false(),
+                        installed => JSON::PP::false(),
+                        source => { type => 'remote' },
+                    },
+                ],
+            }],
+        };
+    } elsif ($method eq 'plugin/install') {
+        open my $action_file, '>', "$cwd/last-plugin-install.json" or die $!;
+        print {$action_file} encode_json($params);
+        close $action_file;
+        $result = {
+            authPolicy => 'ON_USE',
+            appsNeedingAuth => [],
+        };
+    } elsif ($method eq 'plugin/uninstall') {
+        open my $action_file, '>', "$cwd/last-plugin-uninstall.json" or die $!;
+        print {$action_file} encode_json($params);
+        close $action_file;
+        $result = {};
+    } elsif ($method eq 'plugin/reconcile') {
+        open my $action_file, '>', "$cwd/last-plugin-reconcile.json" or die $!;
+        print {$action_file} encode_json($params);
+        close $action_file;
+        $result = {
+            changedPlugins => [],
+            failedRemotePluginIds => [],
+            failedMaterializationRemotePluginIds => [],
+        };
+    } elsif ($method eq 'config/value/write') {
+        open my $action_file, '>', "$cwd/last-config-write.json" or die $!;
+        print {$action_file} encode_json($params);
+        close $action_file;
+        $result = {
+            status => 'ok',
+            version => 'fixture-version',
+            filePath => "$cwd/config.toml",
+        };
+    } elsif ($method eq 'thread/list') {
+        open my $list_file, '>', "$cwd/last-thread-list.json" or die $!;
+        print {$list_file} encode_json($params);
+        close $list_file;
+        $result = {
+            data => [{
+                id => 'bot-fixture-search-thread',
+                cwd => $cwd,
+                name => 'Provider authentication',
+                preview => "Find provider authentication\nKeep session state",
+                model => 'test-model',
+                reasoningEffort => 'low',
+                createdAt => 1_789_387_200,
+                updatedAt => 1_789_387_323,
+                turns => [],
+            }],
+            nextCursor => undef,
+        };
+    } elsif ($method eq 'thread/search') {
+        open my $search_file, '>', "$cwd/last-thread-search.json" or die $!;
+        print {$search_file} encode_json($params);
+        close $search_file;
+        $result = {
+            data => [{
+                thread => {
+                    id => 'bot-fixture-search-thread',
+                    cwd => $cwd,
+                    name => 'Provider authentication',
+                    preview => "Find provider authentication\nKeep session state",
+                    model => 'test-model',
+                    reasoningEffort => 'low',
+                    createdAt => 1_789_387_200,
+                    updatedAt => 1_789_387_323,
+                    turns => [],
+                },
+                snippet => 'Matched provider authentication in session content',
+            }],
+            nextCursor => undef,
+            backwardsCursor => undef,
+        };
+    } elsif ($method eq 'thread/start') {
+        $thread_index++;
+        $thread = $thread_index == 1 ? 'bot-fixture-thread' : "bot-fixture-thread-$thread_index";
+        $cwd = $params->{cwd};
+        open my $thread_file, '>', "$cwd/last-thread-start.json" or die $!;
+        print {$thread_file} encode_json($params);
+        close $thread_file;
+        $result = { thread => { id => $thread, cwd => $cwd, turns => [] }, cwd => $cwd, model => 'test-model', reasoningEffort => 'low' };
+    } elsif ($method eq 'thread/resume') {
+        $thread = $params->{threadId} // 'bot-fixture-thread';
+        $cwd = $params->{cwd};
+        $result = { thread => { id => $thread, cwd => $cwd, turns => [] }, cwd => $cwd, model => 'test-model', reasoningEffort => 'low' };
+    } elsif ($method eq 'thread/compact/start') {
+        open my $compact_file, '>', "$cwd/last-compact.json" or die $!;
+        print {$compact_file} encode_json($params);
+        close $compact_file;
+        $result = {};
+    } elsif ($method eq 'thread/name/set') {
+        open my $name_file, '>', "$cwd/last-thread-name.json" or die $!;
+        print {$name_file} encode_json($params);
+        close $name_file;
+        $result = {};
+    } elsif ($method eq 'thread/delete') {
+        open my $delete_file, '>', "$cwd/last-thread-delete.json" or die $!;
+        print {$delete_file} encode_json($params);
+        close $delete_file;
+        $result = {};
+    } elsif ($method eq 'thread/fork') {
+        open my $fork_file, '>', "$cwd/last-thread-fork.json" or die $!;
+        print {$fork_file} encode_json($params);
+        close $fork_file;
+        $thread_index++;
+        $thread = "bot-fixture-fork-$thread_index";
+        $cwd = $params->{cwd} // $cwd;
+        $result = { thread => { id => $thread, cwd => $cwd, turns => [] }, cwd => $cwd, model => 'test-model', reasoningEffort => 'low' };
+    } elsif ($method eq 'turn/start') {
+        $thread = $params->{threadId} // $thread;
+        $cwd = $params->{cwd} // $cwd;
+        open my $turn_file, '>', "$cwd/last-turn.json" or die $!;
+        print {$turn_file} encode_json($params);
+        close $turn_file;
+        my $text = $params->{input}[0]{text} // '';
+        if ($text eq 'FAIL') {
+            emit({ id => $request->{id}, error => { code => -32000, message => 'Fixture turn failed' } });
+            next;
+        }
+        if ($text eq 'START_WAIT') {
+            open my $started_file, '>', "$cwd/turn-starting" or die $!;
+            close $started_file;
+            select undef, undef, undef, 0.5;
+        } elsif ($text eq 'APPROVAL') {
+            $approval_thread = $thread;
+            emit({ id => 700, method => 'item/commandExecution/requestApproval', params => { threadId => $thread, turnId => $turn, itemId => 'approval-1', command => ['printf', 'ok'] } });
+        } elsif ($text eq 'TURN_DIFF') {
+            emit({ method => 'turn/diff/updated', params => { threadId => $thread, turnId => $turn, diff => "diff --git a/src/main.rs b/src/main.rs\n--- a/src/main.rs\n+++ b/src/main.rs\n@@ -1 +1 @@\n-old\n+new\n" } });
+        } elsif ($text eq 'MCP_FORM') {
+            $elicitation_thread = $thread;
+            emit({ id => 701, method => 'mcpServer/elicitation/request', params => { threadId => $thread, turnId => $turn, serverName => 'form-fixture', mode => 'form', _meta => { trace => 'form-fixture' }, message => 'Enter a value', requestedSchema => { type => 'object', properties => { value => { type => 'string' } }, required => ['value'] } } });
+        } elsif ($text eq 'MCP_URL') {
+            $elicitation_thread = $thread;
+            emit({ id => 702, method => 'mcpServer/elicitation/request', params => { threadId => $thread, turnId => $turn, serverName => 'oauth-fixture', mode => 'url', _meta => { trace => 'url-fixture' }, message => 'Sign in', url => 'https://example.com/login', elicitationId => 'elicit-fixture' } });
+        } elsif ($text eq 'QUESTION') {
+            $question_thread = $thread;
+            emit({ id => 703, method => 'item/tool/requestUserInput', params => { threadId => $thread, turnId => $turn, itemId => 'question-fixture', isBlocking => JSON::PP::false(), autoResolutionMs => 1, questions => [
+                { id => 'choice', header => 'Mode', question => 'Choose a mode', isOther => JSON::PP::false(), isSecret => JSON::PP::false(), options => [
+                    { label => 'Fast', description => 'Finish quickly' },
+                    { label => 'Safe', description => 'Check every step' },
+                ] },
+                { id => 'secret', header => 'Token', question => 'Enter token', isOther => JSON::PP::false(), isSecret => JSON::PP::true() },
+            ] } });
+        } elsif ($text eq 'DYNAMIC_TOOL') {
+            $dynamic_thread = $thread;
+            emit({ method => 'item/started', params => { threadId => $thread, turnId => $turn, item => { id => 'dynamic-fixture', type => 'dynamicToolCall', tool => 'lookup', namespace => 'records', arguments => { key => 'alpha' }, status => 'inProgress' } } });
+            emit({ id => 704, method => 'item/tool/call', params => { threadId => $thread, turnId => $turn, callId => 'dynamic-fixture', tool => 'lookup', namespace => 'records', arguments => { key => 'alpha' }, futureField => { kept => JSON::PP::true() } } });
+        } else {
+            emit({ method => 'item/agentMessage/delta', params => { threadId => $thread, turnId => $turn, itemId => 'message-1', delta => "BOT_FIXTURE_OK\n" } });
+        }
+        if ($text ne 'WAIT' && $text ne 'START_WAIT' && $text ne 'APPROVAL' && $text ne 'MCP_FORM' && $text ne 'MCP_URL' && $text ne 'QUESTION' && $text ne 'DYNAMIC_TOOL') {
+            emit({ method => 'turn/completed', params => { threadId => $thread, turn => { id => $turn, status => 'completed', items => [] } } });
+        }
+        $result = { turn => { id => $turn, status => 'inProgress', items => [] } };
+    } elsif ($method eq 'thread/turns/list') {
+        $result = {
+            data => [
+                { id => 'turn-1', status => 'completed', createdAt => '2026-09-14T00:00:00Z', items => [
+                    { type => 'userMessage', content => [{ type => 'text', text => 'First prompt' }] },
+                    { type => 'agentMessage', text => 'First response' },
+                ] },
+                { id => 'turn-2', status => 'completed', createdAt => '2026-09-14T00:01:00Z', items => [
+                    { type => 'userMessage', content => [{ type => 'text', text => 'Second prompt' }] },
+                    { type => 'fileChange', id => 'change-2', changes => [] },
+                ] },
+            ],
+            nextCursor => undef,
+        };
+    } elsif ($method eq 'thread/revert') {
+        open my $revert_file, '>', "$cwd/last-thread-revert.json" or die $!;
+        print {$revert_file} encode_json($params);
+        close $revert_file;
+        $result = { thread => { id => $thread, turns => [] } };
+    } elsif ($method eq 'turn/steer') {
+        open my $steer_file, '>', "$cwd/last-turn-steer.json" or die $!;
+        print {$steer_file} encode_json($params);
+        close $steer_file;
+        $result = { turnId => $params->{expectedTurnId} };
+    } elsif ($method eq 'turn/interrupt') {
+        open my $interrupted_file, '>', "$cwd/interrupted" or die $!;
+        close $interrupted_file;
+        emit({ method => 'turn/completed', params => { threadId => $thread, turn => { id => $turn, status => 'interrupted', items => [] } } });
+        $result = {};
+    } elsif ($method eq 'thread/backgroundTerminals/clean') {
+        open my $marker, '>', "$cwd/cancelled" or die $!;
+        close $marker;
+        emit({ method => 'turn/completed', params => { threadId => $thread, turn => { id => $turn, status => 'interrupted', items => [] } } });
+    } else {
+        emit({ id => $request->{id}, error => { code => -32601, message => "Unexpected method: $method" } });
+        next;
+    }
+    emit({ id => $request->{id}, result => $result });
+}

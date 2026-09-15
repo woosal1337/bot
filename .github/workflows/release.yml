@@ -1,0 +1,167 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            archive: tar
+          - runner: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            archive: tar
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: tar
+          - runner: macos-15
+            target: aarch64-apple-darwin
+            archive: tar
+          - runner: windows-2025
+            target: x86_64-pc-windows-msvc
+            archive: zip
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87
+        with:
+          toolchain: 1.94.0
+          targets: ${{ matrix.target }}
+      - name: Install Protocol Buffers
+        uses: arduino/setup-protoc@c65c819552d16ad3c9b72d9dfd5ba5237b9c906b
+        with:
+          version: "29.3"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Restore the Rust cache
+        uses: Swatinem/rust-cache@49a0bdc70d2e1b713ca9e2869b211fcce03d3c1c
+        with:
+          key: ${{ matrix.target }}
+      - name: Build Bot
+        env:
+          CARGO_PROFILE_RELEASE_DIST_LTO: ${{ matrix.archive == 'zip' && 'off' || 'thin' }}
+        run: cargo build --locked --profile release-dist --target ${{ matrix.target }} -p xai-grok-pager-bin --bin bot --features release-dist
+      - name: Check Bot on Unix
+        if: matrix.archive == 'tar'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: "target/${TARGET}/release-dist/bot --version"
+      - name: Check Bot on Windows
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: '& "target/$env:TARGET/release-dist/bot.exe" --version'
+      - name: Package Bot
+        if: matrix.archive == 'tar'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          package="bot-${TARGET}"
+          mkdir -p "dist/${package}"
+          mkdir -p "dist/${package}/assets"
+          mkdir -p "dist/${package}/docs"
+          cp "target/${TARGET}/release-dist/bot" "dist/${package}/bot"
+          cp assets/bot-wordmark.svg "dist/${package}/assets/bot-wordmark.svg"
+          cp docs/release-status.md "dist/${package}/docs/release-status.md"
+          cp LICENSE NOTICE THIRD-PARTY-NOTICES README.md SECURITY.md "dist/${package}/"
+          tar -C dist -czf "dist/${package}.tar.gz" "${package}"
+      - name: Package Bot for Windows
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          $Package = "bot-$env:TARGET"
+          New-Item -ItemType Directory -Path "dist/$Package" | Out-Null
+          New-Item -ItemType Directory -Path "dist/$Package/assets" | Out-Null
+          New-Item -ItemType Directory -Path "dist/$Package/docs" | Out-Null
+          Copy-Item "target/$env:TARGET/release-dist/bot.exe" "dist/$Package/bot.exe"
+          Copy-Item "assets/bot-wordmark.svg" "dist/$Package/assets/bot-wordmark.svg"
+          Copy-Item "docs/release-status.md" "dist/$Package/docs/release-status.md"
+          Copy-Item LICENSE,NOTICE,THIRD-PARTY-NOTICES,README.md,SECURITY.md "dist/$Package/"
+          Compress-Archive -Path "dist/$Package" -DestinationPath "dist/$Package.zip"
+      - name: Attest the archive
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: dist/bot-*.${{ matrix.archive == 'zip' && 'zip' || 'tar.gz' }}
+      - name: Upload the archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: bot-${{ matrix.target }}
+          path: dist/bot-*.${{ matrix.archive == 'zip' && 'zip' || 'tar.gz' }}
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish release
+    needs: build
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - name: Check the release version
+        shell: bash
+        run: |
+          version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' crates/codegen/xai-grok-pager-bin/Cargo.toml | head -1)"
+          test "${GITHUB_REF_NAME}" = "v${version}"
+      - name: Verify the release signatures
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ref="repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}"
+          test "$(gh api "$ref" --jq '.object.type')" = tag
+          tag_sha="$(gh api "$ref" --jq '.object.sha')"
+          tag="repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}"
+          test "$(gh api "$tag" --jq '.verification.verified')" = true
+          test "$(gh api "$tag" --jq '.object.sha')" = "$(git rev-parse HEAD)"
+          commit="repos/${GITHUB_REPOSITORY}/git/commits/$(git rev-parse HEAD)"
+          test "$(gh api "$commit" --jq '.verification.verified')" = true
+      - name: Download the archives
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0
+        with:
+          path: dist
+          pattern: bot-*
+          merge-multiple: true
+      - name: Create checksums
+        shell: bash
+        run: cd dist && sha256sum bot-* > SHA256SUMS
+      - name: Attest the checksums
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
+        with:
+          subject-path: dist/SHA256SUMS
+      - name: Publish the GitHub release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --notes-file "docs/releases/${GITHUB_REF_NAME#v}.md" --title "Bot ${GITHUB_REF_NAME#v}"

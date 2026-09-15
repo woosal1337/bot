@@ -1,0 +1,12 @@
+Bot
+Copyright 2026 Bot contributors
+
+Bot includes and modifies Grok Build source from SpaceXAI.
+Grok Build copyright 2023-2026 SpaceXAI.
+
+The imported source baseline is commit
+37949780c144e37df692e3d669051a21fec24f20 from
+https://github.com/xai-org/grok-build.
+
+Bot keeps the upstream Apache-2.0 license and third-party notices. Modified
+upstream files carry a Bot change notice. Bot is not an official xAI product.

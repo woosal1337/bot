@@ -1,0 +1,19 @@
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"user-1","type":"userMessage","content":[{"type":"text","text":"Hello"}]}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"hook-1","type":"hookPrompt","fragments":[{"hookRunId":"hook-run-1","text":"Use the project policy."}]}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"message-1","type":"agentMessage","text":"Hello"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"output-1","type":"functionCallOutput","name":"lookup","namespace":"records","output":[{"type":"input_text","text":"record alpha"}]}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"plan-1","type":"plan","text":"Inspect the repository."}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"reasoning-1","type":"reasoning","summary":["Inspecting"],"content":[]}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"command-1","type":"commandExecution","command":"pwd","commandActions":[],"cwd":"/workspace","status":"completed","aggregatedOutput":"/workspace\n","exitCode":0}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"file-1","type":"fileChange","changes":[],"status":"completed"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"mcp-1","type":"mcpToolCall","server":"files","tool":"read","arguments":{"path":"README.md"},"status":"completed"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"dynamic-1","type":"dynamicToolCall","tool":"lookup","namespace":"records","arguments":{"key":"alpha"},"status":"completed","success":true,"contentItems":[{"type":"inputText","text":"record alpha"}]}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"collab-1","type":"collabAgentToolCall","tool":"spawnAgent","senderThreadId":"thread-1","receiverThreadIds":["thread-2"],"agentsStates":{},"status":"completed"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"activity-1","type":"subAgentActivity","agentPath":"agents/reviewer","agentThreadId":"thread-2","kind":"completed"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"web-1","type":"webSearch","query":"Codex app-server"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"image-view-1","type":"imageView","path":"/workspace/image.png"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"sleep-1","type":"sleep","durationMs":250}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"image-generation-1","type":"imageGeneration","result":"","status":"completed","revisedPrompt":"A sailboat"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"review-enter-1","type":"enteredReviewMode","review":"code"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"review-exit-1","type":"exitedReviewMode","review":"code"}}}
+{"method":"item/completed","params":{"threadId":"thread-1","turnId":"turn-1","item":{"id":"compact-1","type":"contextCompaction"}}}

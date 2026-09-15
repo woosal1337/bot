@@ -1,0 +1,2 @@
+{"type":"chatgpt","loginId":"login-browser","authUrl":"https://auth.openai.com/browser"}
+{"type":"chatgptDeviceCode","loginId":"login-device","verificationUrl":"https://auth.openai.com/device","userCode":"ABCD-EFGH","futureField":true}

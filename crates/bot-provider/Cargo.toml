@@ -1,0 +1,15 @@
+[package]
+name = "bot-provider"
+version = "1.0.0"
+edition.workspace = true
+rust-version = "1.88.0"
+authors = ["Bot contributors"]
+license.workspace = true
+
+[dependencies]
+bot-core = { path = "../bot-core" }
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

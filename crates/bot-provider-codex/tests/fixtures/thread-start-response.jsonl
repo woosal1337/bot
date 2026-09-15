@@ -1,0 +1,1 @@
+{"id":9,"result":{"thread":{"id":"019a-thread","model":"gpt-5.4","reasoningEffort":"medium","futureThreadField":true},"model":"gpt-5.4","reasoningEffort":"medium","approvalPolicy":"on-request","approvalsReviewer":"user","cwd":"/work/bot","modelProvider":"openai","sandbox":{"type":"workspaceWrite"},"futureResponseField":8}}

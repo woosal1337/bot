@@ -1,0 +1,42 @@
+{
+  "rateLimits": {
+    "limitId": "codex",
+    "limitName": "Codex",
+    "planType": "pro",
+    "primary": {
+      "usedPercent": 37,
+      "windowDurationMins": 300,
+      "resetsAt": 1789238400,
+      "futureWindowField": "kept"
+    },
+    "secondary": {
+      "usedPercent": 8,
+      "windowDurationMins": 10080,
+      "resetsAt": 1789843200
+    },
+    "credits": {
+      "hasCredits": true,
+      "unlimited": false,
+      "balance": "12.50"
+    },
+    "futureSnapshotField": true
+  },
+  "rateLimitsByLimitId": {
+    "codex": {
+      "limitId": "codex",
+      "limitName": "Codex",
+      "primary": {
+        "usedPercent": 37,
+        "windowDurationMins": 300,
+        "resetsAt": 1789238400
+      }
+    }
+  },
+  "accountId": "account-1",
+  "ordinaryUsageAllowed": true,
+  "rateLimitResetCredits": {
+    "availableCount": 2,
+    "credits": null
+  },
+  "futureResponseField": "kept"
+}
