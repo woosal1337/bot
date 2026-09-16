@@ -366,6 +366,50 @@ fn session_loaded_without_adoption_finishes_replayed_running_entries() {
         "replayed running entries must be finished when no turn is adopted"
     );
 }
+
+#[test]
+fn session_loaded_opens_replayed_transcript_at_latest_message() {
+    let mut app = test_app();
+    dispatch(
+        Action::LoadSession("sess-scroll".into(), None, false),
+        &mut app,
+    );
+    let id = AgentId(0);
+    {
+        let agent = app.agents.get_mut(&id).unwrap();
+        agent.scrollback.end_batch();
+        for turn in 0..20 {
+            agent
+                .scrollback
+                .push_block(RenderBlock::user_prompt(format!("question {turn}")));
+            agent.scrollback.push_block(RenderBlock::stub(
+                format!("answer {turn}\nline two\nline three"),
+                ratatui::style::Color::Blue,
+            ));
+        }
+        agent.scrollback.prepare_layout(80, 12);
+        agent.scrollback.scroll_to_entry_top(0);
+        agent.scrollback.enable_follow_with_preserve();
+        assert!(agent.scrollback.has_content_below());
+        agent.scrollback.begin_batch();
+    }
+    dispatch(
+        Action::TaskComplete(TaskResult::SessionLoaded {
+            agent_id: id,
+            session_id: acp::SessionId::new("sess-scroll"),
+            models: None,
+            code_restored: false,
+            restore_summary: None,
+            restore_degree: None,
+            running_prompt_id: None,
+        }),
+        &mut app,
+    );
+    let agent = app.agents.get_mut(&id).unwrap();
+    agent.scrollback.prepare_layout(80, 12);
+    assert!(agent.scrollback.is_follow_mode());
+    assert!(!agent.scrollback.has_content_below());
+}
 /// Resume into a cwd with `.git/grok-worktree-source` sets `session.is_worktree`.
 #[test]
 fn load_session_marks_standalone_worktree_cwd() {

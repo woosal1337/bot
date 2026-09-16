@@ -1260,6 +1260,7 @@ pub(in crate::app::dispatch) fn handle_session_loaded(
                 child.scrollback.finish_all_running();
             }
         }
+        agent.scrollback.goto_bottom();
         let mut effects = Vec::new();
         if let Some(directive) = agent.pending_first_prompt.take() {
             agent.session.enqueue_prompt_front(directive);
