@@ -1,11 +1,11 @@
-// Modified by the Bot project on 2026-09-16: distinguish conversation-open failures from agent-turn failures.
+// Modified by the Bot project on 2026-09-17: distinguish conversation-open failures and render durable turn receipts.
 //! Unlike [`super::SystemMessageBlock`] (which renders arbitrary text), `SessionEventBlock` uses a [`SessionEvent`] enum.
 //! Each event variant carries structured data (e.g., elapsed time, error messages, token counts).
 //! This enables variant-specific rendering and future styling differentiation.
 
 use std::time::Duration;
 
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::app::actions::PermissionLabel;
@@ -24,7 +24,7 @@ const RECAP_BODY_RANGE: u16 = 0;
 
 /// A session-level event with structured data.
 /// Each variant carries the information needed to render a concise, informational message in the scrollback.
-/// These are non-interactive: unselectable, unfoldable, no accent.
+/// Turn markers are non-interactive; actionable warnings can use an accent.
 #[derive(Debug, Clone)]
 pub enum SessionEvent {
     /// Agent turn completed normally.
@@ -144,7 +144,7 @@ pub enum SessionEvent {
         trigger: String,
     },
     /// A `/goal` finished (status reached Complete).
-    /// Carries the goal's total elapsed time across all its turns, distinct from the per-turn "Worked for" marker.
+    /// Carries the goal's total elapsed time across all its turns, distinct from per-turn completion receipts.
     GoalCompleted {
         /// Goal end-to-end elapsed time (`GoalUpdated.elapsed_ms`).
         elapsed: Duration,
@@ -167,41 +167,39 @@ pub enum SessionEvent {
     },
 }
 
+#[derive(Debug, Clone, Copy)]
+enum TurnReceiptTone {
+    Complete,
+    Stopped,
+    Failed,
+}
+
+#[derive(Debug, Clone)]
+struct TurnReceipt {
+    label: &'static str,
+    detail: String,
+    tone: TurnReceiptTone,
+}
+
+impl TurnReceipt {
+    fn message(&self) -> String {
+        format!("{}{}", self.label, self.detail)
+    }
+}
+
 impl SessionEvent {
     /// Format the event as a human-readable string.
     pub fn message(&self) -> String {
+        if let Some(receipt) = self.turn_receipt() {
+            return receipt.message();
+        }
+
         match self {
-            // Deliberately period-less: don't re-punctuate
-            SessionEvent::TurnCompleted {
-                elapsed: Some(elapsed),
-            } => {
-                format!("Worked for {}", format_duration(*elapsed))
-            }
-            SessionEvent::TurnCompleted { elapsed: None } => "Turn completed.".to_string(),
-            SessionEvent::TurnCancelled { elapsed } => {
-                format!("Turn cancelled by user in {}.", format_duration(*elapsed))
-            }
-            SessionEvent::TurnBlockedByHook { elapsed } => {
-                format!("Turn blocked by a hook in {}.", format_duration(*elapsed))
-            }
-            SessionEvent::TurnHalted { elapsed } => {
-                format!(
-                    "Agent was unable to make progress. Turn ended in {}.",
-                    format_duration(*elapsed)
-                )
-            }
-            SessionEvent::TurnFailed {
-                error,
-                elapsed: Some(elapsed),
-            } => {
-                format!("Turn failed in {}: {error}", format_duration(*elapsed))
-            }
-            SessionEvent::TurnFailed {
-                error,
-                elapsed: None,
-            } => {
-                format!("Turn failed: {error}")
-            }
+            SessionEvent::TurnCompleted { .. }
+            | SessionEvent::TurnCancelled { .. }
+            | SessionEvent::TurnBlockedByHook { .. }
+            | SessionEvent::TurnHalted { .. }
+            | SessionEvent::TurnFailed { .. } => unreachable!(),
             SessionEvent::ConversationOpenFailed { message } => message.clone(),
             SessionEvent::CompactionStarted { percentage } => {
                 format!("Context {percentage}% full. Compacting…")
@@ -315,6 +313,56 @@ impl SessionEvent {
         }
     }
 
+    fn turn_receipt(&self) -> Option<TurnReceipt> {
+        let receipt = match self {
+            SessionEvent::TurnCompleted {
+                elapsed: Some(elapsed),
+            } => TurnReceipt {
+                label: "✓ Turn complete",
+                detail: format!(" · {}", format_duration(*elapsed)),
+                tone: TurnReceiptTone::Complete,
+            },
+            SessionEvent::TurnCompleted { elapsed: None } => TurnReceipt {
+                label: "✓ Turn complete",
+                detail: String::new(),
+                tone: TurnReceiptTone::Complete,
+            },
+            SessionEvent::TurnCancelled { elapsed } => TurnReceipt {
+                label: "■ Turn stopped",
+                detail: format!(" · Cancelled by user · {}", format_duration(*elapsed)),
+                tone: TurnReceiptTone::Stopped,
+            },
+            SessionEvent::TurnBlockedByHook { elapsed } => TurnReceipt {
+                label: "■ Turn stopped",
+                detail: format!(" · Blocked by hook · {}", format_duration(*elapsed)),
+                tone: TurnReceiptTone::Stopped,
+            },
+            SessionEvent::TurnHalted { elapsed } => TurnReceipt {
+                label: "■ Turn stopped",
+                detail: format!(" · Unable to make progress · {}", format_duration(*elapsed)),
+                tone: TurnReceiptTone::Stopped,
+            },
+            SessionEvent::TurnFailed {
+                error,
+                elapsed: Some(elapsed),
+            } => TurnReceipt {
+                label: "✕ Turn failed",
+                detail: format!(" · {} · {error}", format_duration(*elapsed)),
+                tone: TurnReceiptTone::Failed,
+            },
+            SessionEvent::TurnFailed {
+                error,
+                elapsed: None,
+            } => TurnReceipt {
+                label: "✕ Turn failed",
+                detail: format!(" · {error}"),
+                tone: TurnReceiptTone::Failed,
+            },
+            _ => return None,
+        };
+        Some(receipt)
+    }
+
     /// The recap summary text when this is a [`SessionEvent::Recap`].
     /// Recap events render in the tool-call visual style (bullet, bold "Recap" header, muted body); other variants stay plain informational lines.
     /// This accessor is the single branch point the `SessionEventBlock` trait methods use to opt the recap into that style.
@@ -363,8 +411,7 @@ fn format_tokens(tokens: u64) -> String {
     }
 }
 
-/// Visually identical to [`super::SystemMessageBlock`] (muted text, compact, unselectable).
-/// The structured `event` field is available for future styling differentiation (e.g., red text for failures).
+/// Renders compact, structured session events with outcome-specific turn receipts.
 #[derive(Debug, Clone)]
 pub struct SessionEventBlock {
     pub event: SessionEvent,
@@ -459,6 +506,39 @@ impl SessionEventBlock {
             }
         }
     }
+
+    fn turn_receipt_output(&self, ctx: &BlockContext, receipt: TurnReceipt) -> BlockOutput {
+        let theme = Theme::current();
+        let label_style = match receipt.tone {
+            TurnReceiptTone::Complete => Style::default().fg(theme.accent_success),
+            TurnReceiptTone::Stopped => theme.primary(),
+            TurnReceiptTone::Failed => Style::default().fg(theme.warning),
+        }
+        .add_modifier(Modifier::BOLD);
+        let detail_style = match receipt.tone {
+            TurnReceiptTone::Failed => Style::default().fg(theme.warning),
+            TurnReceiptTone::Complete | TurnReceiptTone::Stopped => theme.muted(),
+        };
+        let mut detail_lines = receipt.detail.split('\n');
+        let first_detail = detail_lines.next().unwrap_or_default();
+        let first_line = Line::from(vec![
+            Span::styled(receipt.label, label_style),
+            Span::styled(first_detail.to_owned(), detail_style),
+        ]);
+        let input_lines = std::iter::once(first_line).chain(
+            detail_lines.map(|line| Line::from(Span::styled(line.to_owned(), detail_style))),
+        );
+        let wrapped = word_wrap_lines(input_lines, ctx.width as usize);
+        let mut lines: Vec<BlockLine> = wrapped
+            .into_iter()
+            .map(|line| BlockLine::styled(line).with_selection_range(Some(0)))
+            .collect();
+
+        if lines.is_empty() {
+            lines.push(BlockLine::styled(Line::from("")).with_selection_range(Some(0)));
+        }
+        BlockOutput { lines }
+    }
 }
 
 impl BlockContent for SessionEventBlock {
@@ -466,6 +546,10 @@ impl BlockContent for SessionEventBlock {
         // Recap renders in the tool-call style (bullet, bold header, body)
         if let Some(summary) = self.event.recap_summary() {
             return self.recap_output(ctx, summary);
+        }
+
+        if let Some(receipt) = self.event.turn_receipt() {
+            return self.turn_receipt_output(ctx, receipt);
         }
 
         let theme = Theme::current();
@@ -582,7 +666,7 @@ mod tests {
         let event = SessionEvent::TurnCompleted {
             elapsed: Some(Duration::from_secs(125)),
         };
-        assert_eq!(event.message(), "Worked for 2m5s");
+        assert_eq!(event.message(), "✓ Turn complete · 2m5s");
     }
 
     #[test]
@@ -590,7 +674,7 @@ mod tests {
         let event = SessionEvent::TurnCancelled {
             elapsed: Duration::from_secs(10),
         };
-        assert_eq!(event.message(), "Turn cancelled by user in 10s.");
+        assert_eq!(event.message(), "■ Turn stopped · Cancelled by user · 10s");
     }
 
     #[test]
@@ -608,7 +692,7 @@ mod tests {
         };
         assert_eq!(
             event.message(),
-            "Agent was unable to make progress. Turn ended in 45s."
+            "■ Turn stopped · Unable to make progress · 45s"
         );
     }
 
@@ -618,7 +702,7 @@ mod tests {
             error: "connection reset".into(),
             elapsed: Some(Duration::from_secs(3)),
         };
-        assert_eq!(event.message(), "Turn failed in 3.0s: connection reset");
+        assert_eq!(event.message(), "✕ Turn failed · 3.0s · connection reset");
     }
 
     #[test]
@@ -627,7 +711,126 @@ mod tests {
             error: "auth error".into(),
             elapsed: None,
         };
-        assert_eq!(event.message(), "Turn failed: auth error");
+        assert_eq!(event.message(), "✕ Turn failed · auth error");
+    }
+
+    fn turn_receipt_snapshot(width: u16) -> String {
+        [
+            (
+                "complete",
+                SessionEvent::TurnCompleted {
+                    elapsed: Some(Duration::from_secs(125)),
+                },
+            ),
+            (
+                "stopped",
+                SessionEvent::TurnCancelled {
+                    elapsed: Duration::from_secs(10),
+                },
+            ),
+            (
+                "blocked",
+                SessionEvent::TurnBlockedByHook {
+                    elapsed: Duration::from_millis(700),
+                },
+            ),
+            (
+                "failed",
+                SessionEvent::TurnFailed {
+                    error: "connection reset".into(),
+                    elapsed: Some(Duration::from_secs(3)),
+                },
+            ),
+        ]
+        .into_iter()
+        .map(|(name, event)| {
+            let output = SessionEventBlock::new(event).output(&BlockContext { width, ..ctx() });
+            let lines = output
+                .lines
+                .iter()
+                .map(plain)
+                .collect::<Vec<_>>()
+                .join("\n");
+            format!("{name}:\n{lines}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
+    }
+
+    #[test]
+    fn turn_receipts_snapshot_wide() {
+        insta::assert_snapshot!(turn_receipt_snapshot(80), @r###"
+        complete:
+        ✓ Turn complete · 2m5s
+
+        stopped:
+        ■ Turn stopped · Cancelled by user · 10s
+
+        blocked:
+        ■ Turn stopped · Blocked by hook · 0.7s
+
+        failed:
+        ✕ Turn failed · 3.0s · connection reset
+        "###);
+    }
+
+    #[test]
+    fn turn_receipts_snapshot_narrow() {
+        insta::assert_snapshot!(turn_receipt_snapshot(24), @r###"
+        complete:
+        ✓ Turn complete · 2m5s
+
+        stopped:
+        ■ Turn stopped ·
+        Cancelled by user · 10s
+
+        blocked:
+        ■ Turn stopped · Blocked
+        by hook · 0.7s
+
+        failed:
+        ✕ Turn failed · 3.0s ·
+        connection reset
+        "###);
+    }
+
+    #[test]
+    fn turn_receipts_use_distinct_outcome_styles() {
+        let theme = Theme::current();
+        let cases = [
+            (
+                SessionEvent::TurnCompleted { elapsed: None },
+                theme.accent_success,
+                None,
+            ),
+            (
+                SessionEvent::TurnCancelled {
+                    elapsed: Duration::from_secs(1),
+                },
+                theme.primary().fg.expect("primary style has a foreground"),
+                None,
+            ),
+            (
+                SessionEvent::TurnFailed {
+                    error: "network error".into(),
+                    elapsed: None,
+                },
+                theme.warning,
+                Some(theme.warning),
+            ),
+        ];
+
+        for (event, expected_label_color, expected_accent_color) in cases {
+            let block = SessionEventBlock::new(event);
+            let output = block.output(&ctx());
+            let label_style = output.lines[0].content.spans[0].style;
+            assert_eq!(label_style.fg, Some(expected_label_color));
+            assert!(label_style.add_modifier.contains(Modifier::BOLD));
+            assert_eq!(
+                block.accent(&ctx()).map(|accent| accent.color),
+                expected_accent_color
+            );
+        }
     }
 
     #[test]

@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-13: xAI feedback removal.
+// Modified by the Bot project on 2026-09-17: remove xAI feedback and assert turn receipts.
 //! Unit tests for the turn-finalize rails in [`super`] (`turn_completion`), split out via `#[path]` to keep the module itself small.
 
 use super::*;
@@ -686,7 +686,7 @@ fn cancelled_turn_event_picks_marker_by_category() {
     ));
     assert_eq!(
         cancelled_turn_event(Some(HOOK_DENIED_CATEGORY), d).message(),
-        "Turn blocked by a hook in 0.7s."
+        "■ Turn stopped · Blocked by hook · 0.7s"
     );
 }
 
@@ -1083,7 +1083,7 @@ fn real_end_marker_stays_plain_with_running_work() {
     );
 
     let block = last_marker_block(&agent);
-    assert_eq!(block.event.message(), "Worked for 2.0s");
+    assert_eq!(block.event.message(), "✓ Turn complete · 2.0s");
     assert_eq!(
         agent.watchers().commands,
         1,
@@ -1092,7 +1092,7 @@ fn real_end_marker_stays_plain_with_running_work() {
 }
 
 #[test]
-fn workless_marker_renders_legacy_text() {
+fn workless_marker_renders_completion_receipt() {
     let mut agent = running_driver("p1");
 
     push_turn_terminal_marker(
@@ -1103,7 +1103,7 @@ fn workless_marker_renders_legacy_text() {
     );
 
     let block = last_marker_block(&agent);
-    assert_eq!(block.event.message(), "Worked for 2.0s");
+    assert_eq!(block.event.message(), "✓ Turn complete · 2.0s");
 }
 
 // ── Send-now cancel marker suppression (viewer finalize rail) ────────
@@ -1219,7 +1219,10 @@ fn turn_end_after_park_pushes_single_marker() {
         1,
         "the real turn end pushes exactly one marker"
     );
-    assert_eq!(last_marker_block(&agent).event.message(), "Worked for 5.0s");
+    assert_eq!(
+        last_marker_block(&agent).event.message(),
+        "✓ Turn complete · 5.0s"
+    );
 }
 
 fn base_input<'a>(stop: TurnStopReason) -> TerminalMarkerInput<'a> {

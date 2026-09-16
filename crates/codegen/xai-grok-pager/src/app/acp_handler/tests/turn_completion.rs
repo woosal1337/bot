@@ -1,3 +1,4 @@
+// Modified by the Bot project on 2026-09-17: assert replayed turn receipts.
 #![cfg_attr(rustfmt, rustfmt::skip)]
     use super::*;
 
@@ -1489,7 +1490,7 @@
         let agent = app.agents.get(&AgentId(0)).unwrap();
         match last_session_event(&agent.scrollback) {
             Some(ev @ SessionEvent::TurnCompleted { elapsed: None }) => {
-                assert_eq!(ev.message(), "Turn completed.");
+                assert_eq!(ev.message(), "✓ Turn complete");
             }
             other => panic!("expected markerless-elapsed completed, got {other:?}"),
         }

@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-13: xAI feedback removal.
+// Modified by the Bot project on 2026-09-17: remove xAI feedback and preserve durable turn receipts.
 //! Finalizing a turn from a terminal turn signal.
 //!
 //! The pager learns a turn reached its terminal outcome from two rails.
@@ -505,7 +505,7 @@ pub(super) fn finalize_turn_from_terminal(
 
     // Capture elapsed BEFORE `mark_turn_finished()` clears `turn_started_at`
     // The anchor was back-dated from the authoritative `turnStartMs` on adoption, so this reads the same wall-clock duration the driver shows
-    // Missing clock stays `None` (same as the live driver) so we render "Turn completed." rather than "Worked for 0.0s"
+    // Missing clock stays `None` (same as the live driver) so the receipt omits a false "0.0s" duration
     let elapsed_ms = duration_to_elapsed_ms(agent.turn_elapsed());
 
     // Before `finish_turn`: the blocked-prompt requeue reads `in_flight_prompt`, which finish_turn clears
@@ -525,7 +525,7 @@ pub(super) fn finalize_turn_from_terminal(
         None => expected_send_now.is_some(),
     };
 
-    // A viewer never receives the driver's `PromptResponse` RPC, the source of the driver's "Worked for X" marker. Surface the equivalent here.
+    // A viewer never receives the driver's `PromptResponse` RPC, the source of the driver's completion receipt. Surface the equivalent here.
     let event = terminal_marker(TerminalMarkerInput {
         stop: TurnStopReason::from(stop_reason),
         elapsed_ms,
