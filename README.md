@@ -32,6 +32,21 @@ irm https://raw.githubusercontent.com/woosal1337/bot/main/scripts/install.ps1 | 
 The Windows installer verifies the release checksum, installs `bot.exe` for the
 current user, and adds its directory to the user `PATH`.
 
+### Update an installed copy
+
+Close Bot, then run the install command for your operating system again. It
+downloads the latest published release, checks its archive hash, and replaces
+the installed binary. Run `bot --version` to check the installed version. See
+the [latest release](https://github.com/woosal1337/bot/releases/latest) to
+check the available version. A commit on `main` does not update an installed
+copy; a new release must publish first. Bot does not yet check for updates in
+the terminal interface.
+
+The one-line install commands above fetch their scripts from `main`. The
+release archive is checked, but the script itself is not checked before it
+runs. Each release also includes the installer scripts in `SHA256SUMS`. Download
+the script and the checksum file from the release when you must check both.
+
 ### Build from source
 
 Install Rust 1.94 and Protocol Buffers, then run:

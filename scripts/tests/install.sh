@@ -50,5 +50,23 @@ if BOT_INSTALL_DIR="$install_directory" \
     printf '%s\n' "The installer accepted an invalid checksum." >&2
     exit 1
 fi
+test "$("${install_directory}/bot")" = "bot-test"
+
+printf '%s\n' '#!/bin/sh' 'printf "%s\n" "bot-next"' > "${package_directory}/bot"
+chmod 0755 "${package_directory}/bot"
+tar -C "${test_directory}/package" -czf "${release_directory}/bot-x86_64-unknown-linux-gnu.tar.gz" "bot-x86_64-unknown-linux-gnu"
+(
+    cd "$release_directory"
+    sha256sum bot-x86_64-unknown-linux-gnu.tar.gz > SHA256SUMS
+)
+BOT_INSTALL_DIR="$install_directory" \
+BOT_TEST_RELEASE_DIRECTORY="$release_directory" \
+PATH="${command_directory}:/usr/bin:/bin" \
+sh "$(dirname "$0")/../install.sh" > "${test_directory}/update-output"
+test "$("${install_directory}/bot")" = "bot-next"
+if find "$install_directory" -name '.bot-update.*' -print | grep . >/dev/null; then
+    printf '%s\n' "The installer left a staged binary behind." >&2
+    exit 1
+fi
 
 printf '%s\n' "Installer tests passed."

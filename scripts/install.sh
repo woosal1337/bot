@@ -29,7 +29,8 @@ fi
 
 base_url="https://github.com/${repository}/releases/${release_path}"
 temporary_directory="$(mktemp -d)"
-trap 'rm -rf "$temporary_directory"' EXIT HUP INT TERM
+staged_binary=""
+trap '[ -z "$staged_binary" ] || rm -f "$staged_binary"; rm -rf "$temporary_directory"' EXIT HUP INT TERM
 archive_path="${temporary_directory}/${archive_name}"
 checksums_path="${temporary_directory}/SHA256SUMS"
 
@@ -53,7 +54,14 @@ fi
 
 tar -xzf "$archive_path" -C "$temporary_directory"
 mkdir -p "$install_directory"
-install -m 0755 "${temporary_directory}/bot-${target}/bot" "${install_directory}/bot"
+if [ -d "${install_directory}/bot" ] || [ -L "${install_directory}/bot" ]; then
+    printf '%s\n' "Bot will not replace a directory or link at ${install_directory}/bot." >&2
+    exit 1
+fi
+staged_binary="$(mktemp "${install_directory}/.bot-update.XXXXXXXX")"
+install -m 0755 "${temporary_directory}/bot-${target}/bot" "$staged_binary"
+mv -f "$staged_binary" "${install_directory}/bot"
+staged_binary=""
 
 printf 'Installed Bot in %s\n' "${install_directory}/bot"
 if ! command -v bot >/dev/null 2>&1; then

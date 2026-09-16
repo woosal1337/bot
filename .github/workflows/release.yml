@@ -152,9 +152,12 @@ jobs:
           path: dist
           pattern: bot-*
           merge-multiple: true
+      - name: Add installer scripts
+        shell: bash
+        run: cp scripts/install.sh scripts/install.ps1 dist/
       - name: Create checksums
         shell: bash
-        run: cd dist && sha256sum bot-* > SHA256SUMS
+        run: cd dist && sha256sum bot-* install.sh install.ps1 > SHA256SUMS
       - name: Attest the checksums
         if: github.event.repository.visibility == 'public'
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6
