@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-13: Removed xAI feedback persistence.
+// Modified by the Bot project on 2026-09-16: add provider/model effort preference persistence.
 use super::persist::update_config;
 use anyhow::Result;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
@@ -192,6 +192,36 @@ pub async fn set_default_model(value: String) -> Result<()> {
     .await
 }
 
+pub async fn set_model_effort_default(
+    provider: String,
+    model: String,
+    effort: Option<String>,
+) -> Result<()> {
+    if provider.is_empty()
+        || provider.len() > 64
+        || !provider
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        anyhow::bail!("Invalid provider key for an effort preference.");
+    }
+    if model.is_empty() || model.len() > MAX_DEFAULT_MODEL_LEN {
+        anyhow::bail!("Invalid model ID for an effort preference.");
+    }
+    if effort.as_ref().is_some_and(|value| {
+        value
+            .parse::<crate::sampling::types::ReasoningEffort>()
+            .is_err()
+    }) {
+        anyhow::bail!("Unsupported effort value for an effort preference.");
+    }
+    update_config(move |cfg| {
+        cfg.ui
+            .set_model_effort_default(&provider, &model, effort.clone());
+    })
+    .await
+}
+
 /// Persist `[telemetry].trace_upload`.
 pub async fn set_trace_upload(value: bool) -> Result<()> {
     update_config(|cfg| {
@@ -350,4 +380,22 @@ pub async fn set_screen_mode(value: String) -> Result<()> {
 /// Restart-required: `resolve_tips` reads this once at startup.
 pub async fn set_show_tips(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.show_tips = Some(value)).await
+}
+
+#[cfg(test)]
+mod model_effort_default_tests {
+    use crate::agent::config::UiConfig;
+
+    #[test]
+    fn model_effort_defaults_round_trip_through_toml() {
+        let mut ui = UiConfig::default();
+        ui.set_model_effort_default("codex", "gpt-5.6-sol", Some("high".into()));
+        let saved = toml::to_string(&ui).expect("write UI config");
+        let restored: UiConfig = toml::from_str(&saved).expect("read UI config");
+        assert_eq!(
+            restored.model_effort_default("codex", "gpt-5.6-sol"),
+            Some("high")
+        );
+        assert_eq!(restored.model_effort_default("grok", "gpt-5.6-sol"), None);
+    }
 }

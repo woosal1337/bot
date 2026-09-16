@@ -1,4 +1,6 @@
-// Modified by the Bot project on 2026-09-12: Removed provider-specific voice dictation.
+// Modified by the Bot project on 2026-09-16: add model-specific provider effort defaults.
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use xai_grok_config::DisplayRefreshSettings;
 
@@ -13,6 +15,8 @@ pub struct UiConfig {
     /// Model ID to use for the secondary agent when forking.
     /// Defaults to the main default model (from default_models.json).
     pub fork_secondary_model: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub model_effort_defaults: BTreeMap<String, BTreeMap<String, String>>,
     /// Read by `util::config`, declared here for `serde_ignored`.
     #[serde(default)]
     pub yolo: bool,
@@ -235,6 +239,7 @@ impl Default for UiConfig {
             max_thoughts_width: DEFAULT_MAX_THOUGHTS_WIDTH,
             theme: None,
             fork_secondary_model: xai_grok_models::default_model().to_string(),
+            model_effort_defaults: BTreeMap::new(),
             yolo: false,
             ui_theme: None,
             compact_mode: false,
@@ -277,6 +282,32 @@ impl Default for UiConfig {
 }
 
 impl UiConfig {
+    pub fn model_effort_default(&self, provider: &str, model: &str) -> Option<&str> {
+        self.model_effort_defaults
+            .get(provider)?
+            .get(model)
+            .map(String::as_str)
+    }
+
+    pub fn set_model_effort_default(
+        &mut self,
+        provider: &str,
+        model: &str,
+        effort: Option<String>,
+    ) {
+        if let Some(effort) = effort {
+            self.model_effort_defaults
+                .entry(provider.to_owned())
+                .or_default()
+                .insert(model.to_owned(), effort);
+        } else if let Some(models) = self.model_effort_defaults.get_mut(provider) {
+            models.remove(model);
+            if models.is_empty() {
+                self.model_effort_defaults.remove(provider);
+            }
+        }
+    }
+
     /// The single source of truth for the timeline-sidebar default (opt-in). TODO: migrate the other boolean UI settings
     /// (show_timestamps, simple_mode, show_thinking_blocks, …) to the same const and resolver pattern. They currently
     /// duplicate their default literal across cache.rs / config.rs / defs.rs / setters.rs / registry.rs.
@@ -391,6 +422,34 @@ mod tests {
             ..Default::default()
         };
         assert!(!off.page_flip_on_send_enabled());
+    }
+
+    #[test]
+    fn model_effort_defaults_are_isolated_by_provider_and_model() {
+        let mut ui = UiConfig::default();
+        ui.set_model_effort_default("codex", "gpt-5.6-sol", Some("high".into()));
+        ui.set_model_effort_default("codex", "gpt-5.6-terra", Some("medium".into()));
+        ui.set_model_effort_default("grok", "gpt-5.6-sol", Some("low".into()));
+        let saved = serde_json::to_string(&ui).expect("serialize preferences");
+        let mut restored: UiConfig = serde_json::from_str(&saved).expect("read preferences");
+        assert_eq!(
+            restored.model_effort_default("codex", "gpt-5.6-sol"),
+            Some("high")
+        );
+        assert_eq!(
+            restored.model_effort_default("codex", "gpt-5.6-terra"),
+            Some("medium")
+        );
+        assert_eq!(
+            restored.model_effort_default("grok", "gpt-5.6-sol"),
+            Some("low")
+        );
+        restored.set_model_effort_default("codex", "gpt-5.6-sol", None);
+        assert_eq!(restored.model_effort_default("codex", "gpt-5.6-sol"), None);
+        assert_eq!(
+            restored.model_effort_default("grok", "gpt-5.6-sol"),
+            Some("low")
+        );
     }
 
     #[test]
