@@ -41,6 +41,15 @@
 - Use sentence case and verb-first action labels.
 - Make small terminals useful before adding detail to large terminals.
 
+## Updates
+
+- Obey `docs/architecture-and-updates.md` for every upstream, dependency, generated-code, provider, merge, or rebase update.
+- Establish the current test result before the update. Compare it with the result after the update.
+- Port the smallest complete change. Never replace a Bot-owned file or subtree with an upstream copy.
+- Keep provider behavior behind its adapter and extend shared contracts before the interface uses it.
+- Preserve supported behavior unless an accepted decision records its removal.
+- Record the exact update source and revision in the commit or decision record.
+
 ## Quality
 
 - Run `cargo fmt --all --check`.
