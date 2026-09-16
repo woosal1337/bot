@@ -73,6 +73,7 @@ use super::session::load::{
     session_picker_external_filter_active,
 };
 use super::session::modal::{dispatch_rename_session, dispatch_reset_session_title};
+use super::settings::setters::set_default_effort;
 use super::settings::setters::{
     clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
     preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
@@ -1052,6 +1053,8 @@ pub(crate) fn dispatch(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::SetAutoLightTheme(v) => set_auto_light_theme(app, v),
         Action::SetDefaultModel(v) => set_default_model(app, v),
         Action::ClearDefaultModel => clear_default_model(app),
+        Action::SetDefaultEffort(v) => set_default_effort(app, Some(v)),
+        Action::ClearDefaultEffort => set_default_effort(app, None),
         Action::SetForkSecondaryModel(v) => set_fork_secondary_model(app, v),
         Action::ClearForkSecondaryModel => clear_fork_secondary_model(app),
         Action::SetMaxThoughtsWidth(v) => set_max_thoughts_width(app, v),

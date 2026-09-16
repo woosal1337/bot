@@ -115,6 +115,26 @@ pub(crate) fn apply_deferred_model_switch(
         switch
     })
 }
+
+pub(crate) fn preferred_effort_for_new_session(
+    ui: &xai_grok_shell::agent::config::UiConfig,
+    provider: &str,
+    models: &ModelState,
+    stashed: Option<&DeferredModelSwitch>,
+    cli_effort_token: Option<&str>,
+) -> Option<String> {
+    if let Some(token) = cli_effort_token {
+        return Some(token.to_string());
+    }
+    let model_id = stashed
+        .map(|switch| &switch.model_id)
+        .or(models.current.as_ref())?;
+    let token = ui.model_effort_default(provider, model_id.0.as_ref())?;
+    models
+        .resolve_effort_for_model(model_id, token)
+        .ok()
+        .map(|_| token.to_string())
+}
 /// Report effort-token errors and return the model/effort switch (if any).
 pub(crate) fn apply_deferred_switch_outcome(
     agent: &mut AgentView,
@@ -1252,6 +1272,9 @@ pub(in crate::app::dispatch) fn handle_session_created(
     let agent_count = app.agents.len();
     let switch_hint =
         crate::views::dashboard::session_switch_hint_command(app.screen_mode.is_minimal());
+    let provider_key = crate::provider::active_provider().key().to_string();
+    let ui = &app.current_ui;
+    let cli_effort_token = app.cli_effort_token.as_deref();
     if let Some(agent) = app.agents.get_mut(&agent_id) {
         let session_id_clone = session_id.clone();
         if agent.session.created_via_new
@@ -1273,7 +1296,14 @@ pub(in crate::app::dispatch) fn handle_session_created(
             app.models = Some(m).into();
             agent.session.models = app.models.clone();
         }
-        let deferred = apply_deferred_model_switch(agent, app.cli_effort_token.as_deref());
+        let effort_token = preferred_effort_for_new_session(
+            ui,
+            &provider_key,
+            &agent.session.models,
+            agent.session.deferred_model_switch.as_ref(),
+            cli_effort_token,
+        );
+        let deferred = apply_deferred_model_switch(agent, effort_token.as_deref());
         let deferred_mode = agent.deferred_session_mode.take();
         let deferred_permission = agent.deferred_permission_mode.take();
         let cwd = agent.session.cwd.clone();
@@ -1402,7 +1432,14 @@ pub(in crate::app::dispatch) fn handle_worktree_session_created(
         if let Some(summary) = strategy_summary {
             agent.scrollback.push_block(RenderBlock::system(summary));
         }
-        let deferred = apply_deferred_model_switch(agent, app.cli_effort_token.as_deref());
+        let effort_token = preferred_effort_for_new_session(
+            &app.current_ui,
+            crate::provider::active_provider().key(),
+            &agent.session.models,
+            agent.session.deferred_model_switch.as_ref(),
+            app.cli_effort_token.as_deref(),
+        );
+        let deferred = apply_deferred_model_switch(agent, effort_token.as_deref());
         let deferred_mode = agent.deferred_session_mode.take();
         let deferred_permission = agent.deferred_permission_mode.take();
         let cwd = agent.session.cwd.clone();

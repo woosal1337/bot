@@ -544,6 +544,13 @@ pub(super) fn dispatch_send_prompt_submission(
                     yolo_mode: agent.session.is_yolo(),
                     auto_mode: agent.session.is_auto(),
                     current_model_name: agent.session.models.current_model_name(),
+                    current_model_id: agent
+                        .session
+                        .models
+                        .current_model_id_str()
+                        .map(str::to_owned),
+                    active_provider_key: crate::provider::active_provider().key().to_string(),
+                    available_efforts: super::settings::ui::effort_choices(&agent.session.models),
                     available_models: agent
                         .session
                         .models

@@ -62,6 +62,10 @@ Type `/` in the composer to open all available commands. Useful commands include
 `/model`, `/effort`, `/permissions`, `/login`, `/logout`, `/usage`, `/resume`,
 `/fork`, `/rewind`, `/compact`, `/provider`, and `/settings`.
 
+In `/settings`, open Models → Default effort to save an effort level for the
+selected provider and model. Bot uses it for new conversations only. Choose
+“Model default” to clear it. `--effort` takes priority for one launch.
+
 ## Current support
 
 Codex is the production-ready provider in Bot 1.0.0. It uses the supported Codex

@@ -1,6 +1,8 @@
 use crate::acp::model_state::{EffortTokenError, ModelState};
 use crate::app::agent::DeferredModelSwitch;
-use crate::app::dispatch::session::lifecycle::{DeferredSwitchOutcome, take_deferred_model_switch};
+use crate::app::dispatch::session::lifecycle::{
+    DeferredSwitchOutcome, preferred_effort_for_new_session, take_deferred_model_switch,
+};
 use agent_client_protocol as acp;
 use std::sync::Arc;
 use xai_grok_shell::sampling::types::ReasoningEffort;
@@ -31,6 +33,37 @@ fn models_with_current(supports: bool) -> ModelState {
     models.current = Some(id);
     models.reasoning_effort = Some(ReasoningEffort::Medium);
     models
+}
+
+#[test]
+fn new_session_uses_saved_effort_for_selected_provider_model() {
+    let models = models_with_current(true);
+    let mut ui = xai_grok_shell::agent::config::UiConfig::default();
+    ui.set_model_effort_default("codex", "grok-build", Some("high".into()));
+    ui.set_model_effort_default("grok", "grok-build", Some("xhigh".into()));
+    assert_eq!(
+        preferred_effort_for_new_session(&ui, "codex", &models, None, None),
+        Some("high".into())
+    );
+    assert_eq!(
+        preferred_effort_for_new_session(&ui, "codex", &models, None, Some("xhigh")),
+        Some("xhigh".into())
+    );
+    assert_eq!(
+        preferred_effort_for_new_session(&ui, "grok", &models, None, None),
+        Some("xhigh".into())
+    );
+}
+
+#[test]
+fn unsupported_saved_effort_does_not_override_provider_default() {
+    let models = models_with_current(false);
+    let mut ui = xai_grok_shell::agent::config::UiConfig::default();
+    ui.set_model_effort_default("codex", "grok-build", Some("high".into()));
+    assert_eq!(
+        preferred_effort_for_new_session(&ui, "codex", &models, None, None),
+        None
+    );
 }
 
 #[test]

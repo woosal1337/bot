@@ -46,6 +46,7 @@ const ALL_SETTINGS_EXERCISED: &[&str] = &[
     "multiline_mode",
     "permission_mode",
     "default_model",
+    "default_effort",
     "max_thoughts_width",
     "scroll_speed",
     "scroll_mode",
@@ -1900,7 +1901,7 @@ fn registry_kind_membership_through_pr_14() {
     let dynamic_enum_keys = by_kind.remove("DynamicEnum").unwrap_or_default();
     assert_eq!(
         dynamic_enum_keys,
-        vec!["default_model", "fork_secondary_model",],
+        vec!["default_effort", "default_model", "fork_secondary_model",],
         "DynamicEnum kind membership drift",
     );
 
@@ -2008,6 +2009,7 @@ fn defaults_round_trip_through_registry() {
             "multiline_mode" => SettingValue::Bool(false),
             "permission_mode" => SettingValue::Enum("ask"),
             "default_model" => SettingValue::String(String::new()),
+            "default_effort" => SettingValue::String(String::new()),
             "max_thoughts_width" => SettingValue::Int(120),
             "scroll_speed" => SettingValue::Int(50),
             "scroll_mode" => SettingValue::Enum("auto"),
@@ -4151,6 +4153,71 @@ fn pr14_default_model_picker_commits_resolved_model_id() {
         matches!(s.mode(), SettingsModalMode::Browse),
         "successful commit must return to Browse"
     );
+}
+
+#[test]
+fn default_effort_picker_commits_a_provider_offered_level() {
+    let snapshot = PagerLocalSnapshot {
+        current_model_id: Some("gpt-5.6-sol".into()),
+        available_efforts: vec![xai_grok_pager::settings::OwnedEnumChoice {
+            canonical: "high".into(),
+            display: "High".into(),
+            description: "Provider choice".into(),
+        }],
+        ..Default::default()
+    };
+    let mut state = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        snapshot,
+    );
+    navigate_to(&mut state, "default_effort");
+    assert!(matches!(
+        handle_settings_key(&mut state, &press(KeyCode::Enter)),
+        SettingsKeyOutcome::Changed
+    ));
+    assert!(matches!(
+        state.mode(),
+        SettingsModalMode::PickingEnum { key, .. } if key == "default_effort"
+    ));
+    let _ = handle_settings_key(&mut state, &press(KeyCode::Down));
+    assert!(matches!(
+        handle_settings_key(&mut state, &press(KeyCode::Enter)),
+        SettingsKeyOutcome::Action(Action::SetDefaultEffort(value)) if value == "high"
+    ));
+}
+
+#[test]
+fn default_effort_row_opens_by_mouse() {
+    let mut state = SettingsModalState::new(
+        Arc::new(SettingsRegistry::defaults()),
+        UiConfig::default(),
+        PagerLocalSnapshot::default(),
+    );
+    state.list_area = Rect {
+        x: 0,
+        y: 0,
+        width: 80,
+        height: 80,
+    };
+    state.row_rects.resize(state.rows.len(), Rect::default());
+    let row = row_idx_for(&state, "default_effort");
+    state.row_rects[row] = Rect {
+        x: 0,
+        y: row as u16,
+        width: 80,
+        height: 1,
+    };
+    let click = MouseEventKind::Down(crossterm::event::MouseButton::Left);
+    let _ = handle_settings_mouse(&mut state, click, 20, row as u16);
+    assert!(matches!(
+        handle_settings_mouse(&mut state, click, 20, row as u16),
+        SettingsKeyOutcome::Changed
+    ));
+    assert!(matches!(
+        state.mode(),
+        SettingsModalMode::PickingEnum { key, .. } if key == "default_effort"
+    ));
 }
 
 /// Row-0 "(no override)" dispatches `ClearDefaultModel`.

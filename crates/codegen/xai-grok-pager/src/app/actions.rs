@@ -499,6 +499,8 @@ pub enum Action {
     /// The dispatcher switches the active session and persists via `Effect::PersistSetting`.
     /// Does not carry effort; use `Action::SwitchModel` for that.
     SetDefaultModel(acp::ModelId),
+    SetDefaultEffort(String),
+    ClearDefaultEffort,
     /// Clear the persisted default model (`cfg.models.default = None`).
     /// Active session's model is unchanged; next session resolves via the shell's default-resolution chain.
     ClearDefaultModel,
@@ -1502,6 +1504,11 @@ pub enum Effect {
         key: crate::settings::SettingKey,
         value: crate::settings::SettingValue,
         rollback_value: crate::settings::SettingValue,
+    },
+    PersistModelEffortDefault {
+        provider: String,
+        model: String,
+        effort: Option<String>,
     },
     /// Toggle mouse reporting off and on to unwedge xterm.js's button tracker
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
@@ -2736,6 +2743,14 @@ pub enum TaskResult {
     SettingPersisted {
         key: crate::settings::SettingKey,
         value: crate::settings::SettingValue,
+    },
+    ModelEffortDefaultPersisted {
+        provider: String,
+        model: String,
+        effort: Option<String>,
+    },
+    ModelEffortDefaultPersistFailed {
+        error: String,
     },
     /// Setting persist failed.
     /// Rolls back in-memory cache to `rollback_value` and shows a failure toast.

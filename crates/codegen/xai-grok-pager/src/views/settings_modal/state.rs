@@ -947,6 +947,19 @@ pub(super) fn action_for_string(
                     .map(Action::SetDefaultModel)
             }
         }
+        "default_effort" => {
+            if value.is_empty() {
+                Some(Action::ClearDefaultEffort)
+            } else if snapshot
+                .available_efforts
+                .iter()
+                .any(|choice| choice.canonical == value)
+            {
+                Some(Action::SetDefaultEffort(value))
+            } else {
+                None
+            }
+        }
         "fork_secondary_model" => {
             if value.is_empty() {
                 Some(Action::ClearForkSecondaryModel)

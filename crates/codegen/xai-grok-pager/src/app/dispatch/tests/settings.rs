@@ -1,6 +1,46 @@
 // Modified by the Bot project on 2026-09-12: remove inherited updater settings coverage.
 //! Tests for settings setters, toggles, resets, and rollback.
 use super::*;
+
+#[test]
+fn default_effort_action_saves_only_an_offered_level() {
+    let mut app = test_app_with_agent();
+    let id = acp::ModelId::new("test-model");
+    let info = acp::ModelInfo::new(id.clone(), "Test model").meta(
+        serde_json::json!({
+            "supportsReasoningEffort": true,
+            "reasoningEfforts": [{ "id": "high", "value": "high", "label": "High" }]
+        })
+        .as_object()
+        .cloned(),
+    );
+    let agent = app.agents.get_mut(&AgentId(0)).expect("test agent");
+    agent.session.models.available.insert(id.clone(), info);
+    agent.session.models.current = Some(id);
+    let effects = dispatch(Action::SetDefaultEffort("high".into()), &mut app);
+    assert!(matches!(
+        effects.as_slice(),
+        [Effect::PersistModelEffortDefault { provider, model, effort }]
+            if provider == "grok" && model == "test-model" && effort.as_deref() == Some("high")
+    ));
+    assert!(dispatch(Action::SetDefaultEffort("ultra".into()), &mut app).is_empty());
+    dispatch(
+        Action::TaskComplete(TaskResult::ModelEffortDefaultPersisted {
+            provider: "grok".into(),
+            model: "test-model".into(),
+            effort: Some("high".into()),
+        }),
+        &mut app,
+    );
+    assert_eq!(
+        app.current_ui.model_effort_default("grok", "test-model"),
+        Some("high")
+    );
+    assert!(matches!(
+        dispatch(Action::ClearDefaultEffort, &mut app).as_slice(),
+        [Effect::PersistModelEffortDefault { effort: None, .. }]
+    ));
+}
 /// `Action::ToggleVimMode` flips the active agent's `vim_mode` field and the in-process pager cache (`load_vim_mode`) that seeds future agents.
 /// It emits `Effect::PersistSetting` so the new value lands in `[ui].vim_mode` in config.toml, and a second toggle restores the original.
 #[test]

@@ -94,6 +94,7 @@ pub enum DynamicEnumSource {
     /// Models from the active session's catalog.
     /// Prepends a `"(no override)"` sentinel so the user can clear the setting.
     ActiveModelCatalog,
+    ActiveEffortCatalog,
 }
 
 /// Build the owned choice list for a `DynamicEnum` at picker-open time.
@@ -117,6 +118,16 @@ pub fn dynamic_enum_choices(
                     description: String::new(),
                 });
             }
+            out
+        }
+        DynamicEnumSource::ActiveEffortCatalog => {
+            let mut out = Vec::with_capacity(snapshot.available_efforts.len() + 1);
+            out.push(OwnedEnumChoice {
+                canonical: String::new(),
+                display: "Model default".to_string(),
+                description: "Use this model's provider default effort.".to_string(),
+            });
+            out.extend(snapshot.available_efforts.iter().cloned());
             out
         }
     }
@@ -222,6 +233,9 @@ pub struct PagerLocalSnapshot {
     pub auto_mode: bool,
     /// Currently-selected model's display name, or `None` if no catalog has loaded yet.
     pub current_model_name: Option<String>,
+    pub current_model_id: Option<String>,
+    pub active_provider_key: String,
+    pub available_efforts: Vec<OwnedEnumChoice>,
     /// `(display_name, ModelId)` pairs from the active session's catalog.
     /// Cloned into the snapshot so the modal's validator and resolver are self-contained (the modal outlives the borrow on `app.agents`).
     pub available_models: Vec<(String, acp::ModelId)>,
@@ -254,6 +268,9 @@ impl Default for PagerLocalSnapshot {
             yolo_mode: false,
             auto_mode: false,
             current_model_name: None,
+            current_model_id: None,
+            active_provider_key: "grok".to_string(),
+            available_efforts: Vec::new(),
             available_models: Vec::new(),
             plan_mode_active: false,
             show_tips: None,
@@ -588,6 +605,14 @@ pub fn current_value_for(
         "default_model" => Some(SettingValue::String(
             pager.current_model_name.clone().unwrap_or_default(),
         )),
+        "default_effort" => Some(SettingValue::String(
+            pager
+                .current_model_id
+                .as_deref()
+                .and_then(|model| ui.model_effort_default(&pager.active_provider_key, model))
+                .unwrap_or_default()
+                .to_string(),
+        )),
         // max_thoughts_width: `u16` widened to `i64`.
         "max_thoughts_width" => Some(SettingValue::Int(ui.max_thoughts_width as i64)),
         // plan_mode: canonical via `PlanModeKind::from_bool().as_canonical()`.
@@ -733,6 +758,7 @@ mod tests {
         permission_mode
         multiline_mode
         default_model
+        default_effort
         max_thoughts_width
         show_thinking_blocks
         respect_manual_folds
@@ -780,6 +806,33 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn default_effort_row_reads_only_the_active_provider_model() {
+        let mut ui = UiConfig::default();
+        ui.set_model_effort_default("codex", "gpt-5.6-sol", Some("high".into()));
+        ui.set_model_effort_default("grok", "gpt-5.6-sol", Some("low".into()));
+        let pager = PagerLocalSnapshot {
+            active_provider_key: "codex".into(),
+            current_model_id: Some("gpt-5.6-sol".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("default_effort", &ui, &pager),
+            Some(SettingValue::String("high".into()))
+        );
+        assert_eq!(
+            current_value_for(
+                "default_effort",
+                &ui,
+                &PagerLocalSnapshot {
+                    current_model_id: Some("gpt-5.6-terra".into()),
+                    ..pager
+                }
+            ),
+            Some(SettingValue::String(String::new()))
+        );
     }
 
     /// Every SHELL/SHARED setting's default must match `UiConfig::default()`.
@@ -979,6 +1032,10 @@ mod tests {
                          the live default is resolved dynamically from \
                          cfg.models.default at session start",
                     );
+                }
+                ("default_effort", SettingKind::DynamicEnum { default, .. }) => {
+                    assert_eq!(*default, "");
+                    assert!(ui.model_effort_defaults.is_empty());
                 }
                 // max_thoughts_width: `u16` widened to `i64`.
                 ("max_thoughts_width", SettingKind::Int { default, .. }) => {

@@ -1414,6 +1414,9 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 auto_mode: app.current_ui.permission_mode.as_deref() == Some("auto")
                     && !app.default_yolo,
                 current_model_name: app.models.current_model_name(),
+                current_model_id: app.models.current_model_id_str().map(str::to_owned),
+                active_provider_key: crate::provider::active_provider().key().to_string(),
+                available_efforts: super::settings::ui::effort_choices(&app.models),
                 available_models: app
                     .models
                     .available

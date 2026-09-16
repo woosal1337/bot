@@ -49,6 +49,7 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
+    let active_provider_key = crate::provider::active_provider().key().to_string();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm`
         // The confirm dialog embeds settings state that must stay fresh through async persist failures
@@ -67,6 +68,13 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 yolo_mode: agent.session.is_yolo(),
                 auto_mode: agent.session.is_auto(),
                 current_model_name: agent.session.models.current_model_name(),
+                current_model_id: agent
+                    .session
+                    .models
+                    .current_model_id_str()
+                    .map(str::to_owned),
+                active_provider_key: active_provider_key.clone(),
+                available_efforts: effort_choices(&agent.session.models),
                 available_models: agent
                     .session
                     .models
@@ -196,6 +204,13 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         yolo_mode: agent.session.is_yolo(),
         auto_mode: agent.session.is_auto(),
         current_model_name: agent.session.models.current_model_name(),
+        current_model_id: agent
+            .session
+            .models
+            .current_model_id_str()
+            .map(str::to_owned),
+        active_provider_key: crate::provider::active_provider().key().to_string(),
+        available_efforts: effort_choices(&agent.session.models),
         available_models: agent
             .session
             .models
@@ -573,12 +588,38 @@ fn agent_available_models(app: &AppView) -> Vec<(String, acp::ModelId)> {
     Vec::new()
 }
 
+pub(crate) fn effort_choices(
+    models: &crate::acp::model_state::ModelState,
+) -> Vec<crate::settings::OwnedEnumChoice> {
+    models
+        .reasoning_effort_options()
+        .into_iter()
+        .map(|option| crate::settings::OwnedEnumChoice {
+            canonical: option.value.to_string(),
+            display: option.label,
+            description: option.description.unwrap_or_default(),
+        })
+        .collect()
+}
+
 pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocalSnapshot {
     crate::settings::PagerLocalSnapshot {
         multiline_mode: agent_multiline_mode(app),
         yolo_mode: agent_yolo_mode(app),
         auto_mode: agent_auto_mode(app),
         current_model_name: agent_current_model_name(app),
+        current_model_id: app.active_agent().and_then(|agent| {
+            agent
+                .session
+                .models
+                .current_model_id_str()
+                .map(str::to_owned)
+        }),
+        active_provider_key: crate::provider::active_provider().key().to_string(),
+        available_efforts: app
+            .active_agent()
+            .map(|agent| effort_choices(&agent.session.models))
+            .unwrap_or_default(),
         available_models: agent_available_models(app),
         plan_mode_active: agent_plan_mode(app),
         show_tips: app.show_tips,
@@ -702,6 +743,13 @@ pub(in crate::app::dispatch) fn action_for_reset(
                      registry/dispatch skew (default should be empty string)",
                 );
                 None
+            }
+        }
+        ("default_effort", SettingValue::String(s)) => {
+            if s.is_empty() {
+                Some(Action::ClearDefaultEffort)
+            } else {
+                Some(Action::SetDefaultEffort(s.clone()))
             }
         }
         // max_thoughts_width: direct round-trip.

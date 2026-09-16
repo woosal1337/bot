@@ -706,6 +706,21 @@ pub fn default_settings_for(provider: &crate::provider::ProviderId) -> Vec<Setti
             restart_required: false,
             hidden_in_minimal: false,
         },
+        SettingMeta {
+            key: "default_effort",
+            category: SettingCategory::Models,
+            owner: SettingOwner::Shell,
+            label: "Default effort",
+            description: "Effort for new conversations with the selected model. Choices come from the provider. Choose Model default to clear.",
+            keywords: &["effort", "reasoning", "model", "default", "thinking"],
+            kind: SettingKind::DynamicEnum {
+                default: "",
+                source: DynamicEnumSource::ActiveEffortCatalog,
+                supports_preview: false,
+            },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
         // SHARED. `u16` in UiConfig, widened to `i64` for registry.
         // Width changes apply on the next render frame.
         SettingMeta {

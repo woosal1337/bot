@@ -2055,7 +2055,9 @@ pub(super) fn value_display(meta: &SettingMeta, value: &SettingValue) -> String 
     match value {
         SettingValue::Bool(b) => if *b { "on" } else { "off" }.to_string(),
         SettingValue::String(s) => {
-            if s.is_empty() && matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
+            if s.is_empty() && meta.key == "default_effort" {
+                "Model default".to_string()
+            } else if s.is_empty() && matches!(meta.kind, SettingKind::DynamicEnum { .. }) {
                 "(no override)".to_string()
             } else {
                 s.clone()

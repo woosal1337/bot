@@ -1685,6 +1685,23 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             tracing::trace!(target: "settings", ?key, ?value, "setting persisted");
             vec![]
         }
+        TaskResult::ModelEffortDefaultPersisted {
+            provider,
+            model,
+            effort,
+        } => {
+            app.current_ui
+                .set_model_effort_default(&provider, &model, effort.clone());
+            super::settings::ui::refresh_open_settings_modals(app);
+            let display = effort.as_deref().unwrap_or("Model default");
+            app.show_toast(&format!("Default effort: {display}"));
+            vec![]
+        }
+        TaskResult::ModelEffortDefaultPersistFailed { error } => {
+            let scrubbed = scrub_error_for_toast(&error);
+            app.show_toast(&format!("Could not save default effort: {scrubbed}"));
+            vec![]
+        }
         TaskResult::SettingPersistFailed {
             key,
             rollback_value,

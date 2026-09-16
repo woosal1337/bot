@@ -1593,6 +1593,42 @@ pub(in crate::app::dispatch) fn set_default_model(
     effects
 }
 
+pub(in crate::app::dispatch) fn set_default_effort(
+    app: &mut AppView,
+    value: Option<String>,
+) -> Vec<Effect> {
+    let ActiveView::Agent(agent_id) = app.active_view else {
+        return vec![];
+    };
+    let Some(agent) = app.agents.get(&agent_id) else {
+        return vec![];
+    };
+    let Some(model_id) = agent.session.models.current.as_ref() else {
+        app.show_toast("Choose a model before setting default effort.");
+        return vec![];
+    };
+    if let Some(token) = value.as_deref()
+        && agent
+            .session
+            .models
+            .resolve_effort_for_model(model_id, token)
+            .is_err()
+    {
+        app.show_toast("This model does not offer that effort level.");
+        return vec![];
+    }
+    let provider = crate::provider::active_provider().key().to_string();
+    let model = model_id.0.to_string();
+    if app.current_ui.model_effort_default(&provider, &model) == value.as_deref() {
+        return vec![];
+    }
+    vec![Effect::PersistModelEffortDefault {
+        provider,
+        model,
+        effort: value,
+    }]
+}
+
 /// Clear the default model override.
 /// Persists `[models].default = None`; does NOT mutate the active session's current model.
 pub(in crate::app::dispatch) fn clear_default_model(app: &mut AppView) -> Vec<Effect> {

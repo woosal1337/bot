@@ -27,6 +27,47 @@ fn make_state() -> SettingsModalState {
     )
 }
 
+#[test]
+fn default_effort_picker_uses_provider_choices() {
+    let registry = SettingsRegistry::for_provider(&crate::provider::ProviderId::Codex);
+    let meta = registry.find("default_effort").expect("default effort row");
+    let snapshot = PagerLocalSnapshot {
+        active_provider_key: "codex".into(),
+        current_model_id: Some("gpt-5.6-sol".into()),
+        available_efforts: vec![crate::settings::OwnedEnumChoice {
+            canonical: "high".into(),
+            display: "High".into(),
+            description: "Provider choice".into(),
+        }],
+        ..Default::default()
+    };
+    let SettingKind::DynamicEnum { source, .. } = &meta.kind else {
+        panic!("default effort must use provider choices");
+    };
+    let choices = crate::settings::dynamic_enum_choices(*source, &snapshot);
+    insta::assert_snapshot!(
+        choices
+            .iter()
+            .map(|choice| format!("{}: {}", choice.display, choice.canonical))
+            .collect::<Vec<_>>()
+            .join("\n"),
+        @"Model default: \nHigh: high"
+    );
+    assert!(matches!(
+        action_for_string("default_effort", "high".into(), &snapshot),
+        Some(Action::SetDefaultEffort(value)) if value == "high"
+    ));
+    assert!(action_for_string("default_effort", "ultra".into(), &snapshot).is_none());
+    assert!(matches!(
+        action_for_string("default_effort", String::new(), &snapshot),
+        Some(Action::ClearDefaultEffort)
+    ));
+    assert_eq!(
+        value_display(meta, &SettingValue::String(String::new())),
+        "Model default"
+    );
+}
+
 /// The contextual-hints group renders as a single top-level row (children hidden).
 /// Enter opens the sub-sheet, Space there toggles the focused child via the typed action, and Esc returns to Browse.
 #[test]
@@ -273,6 +314,11 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
             "Test Model".to_string(),
             acp::ModelId::new(Arc::from("test-model")),
         )],
+        available_efforts: vec![crate::settings::OwnedEnumChoice {
+            canonical: "high".into(),
+            display: "High".into(),
+            description: String::new(),
+        }],
         ..PagerLocalSnapshot::default()
     };
     for meta in reg.all() {
@@ -283,7 +329,12 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
         // A refactor could swallow the typed `SetDefaultModel` / `SetForkSecondaryModel` into a generic `Action::DynamicSettingChanged(...)`
         // That would pass `is_some()` while breaking the typed dispatch
         let empty_action = action_for_string(meta.key, String::new(), &snapshot);
-        let nonempty_action = action_for_string(meta.key, "Test Model".to_string(), &snapshot);
+        let nonempty = if meta.key == "default_effort" {
+            "high"
+        } else {
+            "Test Model"
+        };
+        let nonempty_action = action_for_string(meta.key, nonempty.to_string(), &snapshot);
         match meta.key {
             "default_model" => {
                 assert!(
@@ -295,6 +346,12 @@ fn every_dynamic_enum_setting_has_action_for_string_arm() {
                     matches!(nonempty_action, Some(Action::SetDefaultModel(_))),
                     "default_model non-empty canonical must produce \
                      SetDefaultModel(_), got {nonempty_action:?}",
+                );
+            }
+            "default_effort" => {
+                assert!(matches!(empty_action, Some(Action::ClearDefaultEffort)));
+                assert!(
+                    matches!(nonempty_action, Some(Action::SetDefaultEffort(value)) if value == "high")
                 );
             }
             "fork_secondary_model" => {
@@ -578,7 +635,7 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "plan_mode",
             // SHELL-owned default_model (Models category).
             "default_model",
-            // Models category. `default_reasoning_effort`, `web_search_model`, and `session_summary_model` are not exposed in the modal.
+            "default_effort",
             "fork_secondary_model",
             // `auto_compact_threshold_percent` (Session category) is not exposed in the modal
             // Advanced category.

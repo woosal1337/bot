@@ -2142,6 +2142,30 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::PersistModelEffortDefault {
+            provider,
+            model,
+            effort,
+        } => {
+            tasks.spawn(async move {
+                match xai_grok_shell::util::config::set_model_effort_default(
+                    provider.clone(),
+                    model.clone(),
+                    effort.clone(),
+                )
+                .await
+                {
+                    Ok(()) => TaskResult::ModelEffortDefaultPersisted {
+                        provider,
+                        model,
+                        effort,
+                    },
+                    Err(error) => TaskResult::ModelEffortDefaultPersistFailed {
+                        error: error.to_string(),
+                    },
+                }
+            });
+        }
         Effect::Authenticate {
             request_seq,
             method_id,
