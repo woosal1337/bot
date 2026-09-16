@@ -54,6 +54,7 @@ mod event_loop_stall;
 mod exit_timeout;
 pub(crate) mod external_editor;
 mod foreign_sessions;
+mod herdr;
 mod inline_edit;
 #[cfg(all(test, unix))]
 mod leader_cluster;
