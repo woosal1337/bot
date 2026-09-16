@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-11: load provider-owned sessions without Grok storage.
+// Modified by the Bot project on 2026-09-16: load provider-owned sessions and report writer conflicts.
 //! Session loading, session pickers, and deep-search dispatchers.
 use super::foreign::{
     dispatch_fetch_session_list, invalidate_foreign_picker, next_picker_list_generation,
@@ -1341,14 +1341,49 @@ pub(in crate::app::dispatch) fn handle_session_load_failed(
         agent.session.loading_replay = false;
         agent.pending_first_prompt = None;
         agent.pending_fork_banner = None;
-        agent
-            .scrollback
-            .push_block(RenderBlock::session_event(SessionEvent::TurnFailed {
-                error: format!("Couldn't load session: {error}"),
-                elapsed: None,
-            }));
+        let notice = session_load_failure_notice(&crate::provider::active_provider(), &error);
+        agent.scrollback.push_block(RenderBlock::session_event(
+            SessionEvent::ConversationOpenFailed { message: notice },
+        ));
     }
     vec![]
+}
+
+fn session_load_failure_notice(provider: &crate::provider::ProviderId, error: &str) -> String {
+    if *provider == crate::provider::ProviderId::Codex
+        && error.contains("already has an active writer")
+    {
+        "Could not open conversation. Codex has it open for writing in another client. Close it there, then choose it again with /resume. Bot did not change it.".to_string()
+    } else {
+        format!("Could not open conversation: {error}")
+    }
+}
+
+#[cfg(test)]
+mod session_load_failure_notice_tests {
+    use super::session_load_failure_notice;
+    use crate::provider::ProviderId;
+
+    #[test]
+    fn codex_active_writer_has_a_recovery_action() {
+        let error = "Internal error: \"Codex rejected the request with -32600: thread 01a0a6b7 already has an active writer\"";
+        insta::assert_snapshot!(
+            session_load_failure_notice(&ProviderId::Codex, error),
+            @"Could not open conversation. Codex has it open for writing in another client. Close it there, then choose it again with /resume. Bot did not change it."
+        );
+    }
+
+    #[test]
+    fn other_failures_keep_the_provider_error() {
+        assert_eq!(
+            session_load_failure_notice(&ProviderId::Codex, "session not found"),
+            "Could not open conversation: session not found"
+        );
+        assert_eq!(
+            session_load_failure_notice(&ProviderId::Grok, "already has an active writer"),
+            "Could not open conversation: already has an active writer"
+        );
+    }
 }
 pub(in crate::app::dispatch) fn handle_session_search_debounce_expired(
     app: &mut AppView,

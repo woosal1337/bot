@@ -1,3 +1,4 @@
+// Modified by the Bot project on 2026-09-16: distinguish conversation-open failures from agent-turn failures.
 //! Unlike [`super::SystemMessageBlock`] (which renders arbitrary text), `SessionEventBlock` uses a [`SessionEvent`] enum.
 //! Each event variant carries structured data (e.g., elapsed time, error messages, token counts).
 //! This enables variant-specific rendering and future styling differentiation.
@@ -55,6 +56,9 @@ pub enum SessionEvent {
         error: String,
         /// Elapsed time, if available.
         elapsed: Option<Duration>,
+    },
+    ConversationOpenFailed {
+        message: String,
     },
     /// Auto-compaction started (context window threshold reached).
     CompactionStarted {
@@ -118,9 +122,13 @@ pub enum SessionEvent {
     },
     /// Hook annotation, displayed inline after a tool call.
     /// The message comes from the agent via `XaiSessionUpdate::HookAnnotation`.
-    HookAnnotation { message: String },
+    HookAnnotation {
+        message: String,
+    },
     /// A hook's verdict on the tool call above it (deny, failure, timeout); this block draws the tool-row bullet.
-    HookOutcome { message: String },
+    HookOutcome {
+        message: String,
+    },
     /// The session's persisted model is no longer available after re-auth.
     /// Both IDs are empty when re-shown on blocked prompt attempts.
     ModelUnavailable {
@@ -150,7 +158,9 @@ pub enum SessionEvent {
         auto: bool,
     },
     /// Not persisted: a resumed session shows only the `Plan: Enter` tool row.
-    PlanModeEnteredByAgent { permission: PermissionLabel },
+    PlanModeEnteredByAgent {
+        permission: PermissionLabel,
+    },
     PlanReviewClosed {
         outcome: PlanReviewOutcome,
         permission: PermissionLabel,
@@ -192,6 +202,7 @@ impl SessionEvent {
             } => {
                 format!("Turn failed: {error}")
             }
+            SessionEvent::ConversationOpenFailed { message } => message.clone(),
             SessionEvent::CompactionStarted { percentage } => {
                 format!("Context {percentage}% full. Compacting…")
             }
@@ -325,6 +336,7 @@ impl SessionEvent {
                 | SessionEvent::RequestFailed { .. }
                 | SessionEvent::RetryFailed { .. }
                 | SessionEvent::TurnFailed { .. }
+                | SessionEvent::ConversationOpenFailed { .. }
         )
     }
 
@@ -616,6 +628,16 @@ mod tests {
             elapsed: None,
         };
         assert_eq!(event.message(), "Turn failed: auth error");
+    }
+
+    #[test]
+    fn conversation_open_failure_is_not_an_agent_turn_failure() {
+        let event = SessionEvent::ConversationOpenFailed {
+            message: "Could not open conversation. Retry with /resume.".into(),
+        };
+        insta::assert_snapshot!(event.message(), @"Could not open conversation. Retry with /resume.");
+        assert!(event.is_warning_banner());
+        assert!(!event.is_turn_terminal());
     }
 
     #[test]
