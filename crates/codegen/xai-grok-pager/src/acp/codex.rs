@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-14: native Codex tools, permissions, extensions, and sessions.
+// Modified by the Bot project on 2026-09-17: native Codex tools, permissions, extensions, sessions, and turn receipts.
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -41,6 +41,9 @@ use serde_json::{Map, Value, json};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use xai_acp_lib::{AcpGatewayReceiver, AcpGatewaySender, acp_channels};
+use xai_grok_shell::extensions::notification::{
+    SessionNotification as XaiSessionNotification, SessionUpdate as XaiSessionUpdate,
+};
 use xai_grok_tools::implementations::grok_build::ask_user_question::{
     AskUserQuestionExtRequest, AskUserQuestionExtResponse, AskUserQuestionMode, Question,
     QuestionAnnotation, QuestionMetadata, QuestionOption,
@@ -2133,8 +2136,15 @@ impl acp::Agent for CodexAcpAgent {
                 mode: CollaborationModeKind::Default,
             },
         );
-        for update in replay_updates(&args.session_id, &turns) {
-            self.notify(&args.session_id, update).await;
+        for turn in &turns {
+            for update in replay_updates(&args.session_id, std::slice::from_ref(turn)) {
+                self.notify(&args.session_id, update).await;
+            }
+            if let Some(notification) = replay_turn_completion(&args.session_id, turn)
+                .map_err(acp::Error::into_internal_error)?
+            {
+                let _ = self.gateway.ext_notification(notification).await;
+            }
         }
         Ok(acp::LoadSessionResponse::new()
             .modes(codex_mode_state(CollaborationModeKind::Default))
@@ -3637,6 +3647,35 @@ fn replay_updates(session_id: &acp::SessionId, turns: &[Turn]) -> Vec<acp::Sessi
         .flat_map(|turn| turn.items.iter())
         .flat_map(|item| replay_item(session_id, item))
         .collect()
+}
+
+fn replay_turn_completion(
+    session_id: &acp::SessionId,
+    turn: &Turn,
+) -> serde_json::Result<Option<acp::ExtNotification>> {
+    let stop_reason = match turn.status.as_str() {
+        "completed" => "end_turn",
+        "cancelled" | "interrupted" => "cancelled",
+        "failed" => "error",
+        _ => return Ok(None),
+    };
+    let payload = XaiSessionNotification {
+        session_id: session_id.clone(),
+        update: XaiSessionUpdate::TurnCompleted {
+            prompt_id: turn.id.clone(),
+            stop_reason: stop_reason.to_owned(),
+            agent_result: None,
+            error_kind: None,
+            usage: None,
+            elapsed_ms: None,
+        },
+        meta: Some(json!({ "isReplay": true })),
+    };
+    let raw = serde_json::value::to_raw_value(&payload)?;
+    Ok(Some(acp::ExtNotification::new(
+        "x.ai/session/update",
+        raw.into(),
+    )))
 }
 
 fn replay_item(session_id: &acp::SessionId, item: &Value) -> Vec<acp::SessionUpdate> {
@@ -6614,6 +6653,54 @@ mod tests {
         assert_eq!(serialized[5]["rawInput"]["command"], "pwd");
         assert_eq!(serialized[5]["rawOutput"]["type"], "Bash");
         assert_eq!(serialized[6]["sessionUpdate"], "agent_message_chunk");
+
+        let completion = replay_turn_completion(&acp::SessionId::new("thread-1"), &turns[0])
+            .expect("serialize turn completion")
+            .expect("completed turn has a receipt");
+        assert_eq!(completion.method.as_ref(), "x.ai/session/update");
+        let completion: Value =
+            serde_json::from_str(completion.params.get()).expect("parse turn completion");
+        assert_eq!(completion["sessionId"], "thread-1");
+        assert_eq!(completion["update"]["sessionUpdate"], "turn_completed");
+        assert_eq!(completion["update"]["prompt_id"], "turn-1");
+        assert_eq!(completion["update"]["stop_reason"], "end_turn");
+        assert_eq!(completion["_meta"]["isReplay"], true);
+    }
+
+    #[test]
+    fn replays_only_terminal_codex_turn_receipts() {
+        let session_id = acp::SessionId::new("thread-1");
+        let cases = [
+            ("completed", Some("end_turn")),
+            ("cancelled", Some("cancelled")),
+            ("interrupted", Some("cancelled")),
+            ("failed", Some("error")),
+            ("inProgress", None),
+            ("futureStatus", None),
+        ];
+
+        for (status, expected_stop_reason) in cases {
+            let turn = Turn {
+                id: format!("turn-{status}"),
+                status: status.to_owned(),
+                items: Vec::new(),
+                extra: BTreeMap::new(),
+            };
+            let completion = replay_turn_completion(&session_id, &turn)
+                .expect("serialize terminal turn completion");
+            let actual_stop_reason = completion
+                .map(|notification| {
+                    serde_json::from_str::<Value>(notification.params.get())
+                        .expect("parse terminal turn completion")
+                })
+                .map(|value| {
+                    value["update"]["stop_reason"]
+                        .as_str()
+                        .expect("stop reason is text")
+                        .to_owned()
+                });
+            assert_eq!(actual_stop_reason.as_deref(), expected_stop_reason);
+        }
     }
 
     #[test]
