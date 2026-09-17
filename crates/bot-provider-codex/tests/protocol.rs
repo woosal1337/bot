@@ -923,6 +923,39 @@ fn decodes_account_usage_and_preserves_unknown_fields() {
 }
 
 #[test]
+fn decodes_partial_rate_limits_without_inventing_fields() {
+    let limits: AccountRateLimitsResponse =
+        serde_json::from_str(include_str!("fixtures/account-rate-limits-partial.json"))
+            .expect("partial rate limits");
+    let primary = limits.rate_limits.primary.expect("primary window");
+    assert_eq!(primary.used_percent, 61);
+    assert_eq!(primary.window_duration_mins, None);
+    assert_eq!(primary.resets_at, None);
+    assert!(limits.rate_limits.secondary.is_none());
+}
+
+#[test]
+fn decodes_a_reset_rate_limit_snapshot() {
+    let limits: AccountRateLimitsResponse =
+        serde_json::from_str(include_str!("fixtures/account-rate-limits-reset.json"))
+            .expect("reset rate limits");
+    let primary = limits.rate_limits.primary.expect("primary window");
+    let secondary = limits.rate_limits.secondary.expect("secondary window");
+    assert_eq!(primary.used_percent, 0);
+    assert_eq!(secondary.used_percent, 0);
+    assert_eq!(secondary.window_duration_mins, Some(10_080));
+}
+
+#[test]
+fn decodes_unavailable_account_usage_without_zero_values() {
+    let usage: AccountUsageResponse =
+        serde_json::from_str(include_str!("fixtures/account-usage-unavailable.json"))
+            .expect("unavailable account usage");
+    assert!(usage.summary.is_none());
+    assert!(usage.daily_usage_buckets.is_none());
+}
+
+#[test]
 fn encodes_account_usage_read_request() {
     let line = encode_request(RequestId::Number(9), ACCOUNT_USAGE_READ_METHOD, &())
         .expect("account usage request");

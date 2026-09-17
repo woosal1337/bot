@@ -1,0 +1,8 @@
+{
+  "rateLimits": {
+    "limitId": "codex",
+    "primary": {
+      "usedPercent": 61
+    }
+  }
+}
