@@ -356,7 +356,19 @@ while (my $line = <STDIN>) {
     } elsif ($method eq 'thread/resume') {
         $thread = $params->{threadId} // 'bot-fixture-thread';
         $cwd = $params->{cwd};
-        $result = { thread => { id => $thread, cwd => $cwd, turns => [] }, cwd => $cwd, model => 'test-model', reasoningEffort => 'low' };
+        my $restored_turns = $thread eq 'bot-fixture-resume-usage'
+            ? [{ id => 'restored-turn', status => 'completed', items => [] }]
+            : [];
+        $result = { thread => { id => $thread, cwd => $cwd, turns => $restored_turns }, cwd => $cwd, model => 'test-model', reasoningEffort => 'low' };
+        if ($thread eq 'bot-fixture-resume-usage') {
+            emit({ id => $request->{id}, result => $result });
+            emit({ method => 'thread/tokenUsage/updated', params => { threadId => $thread, turnId => 'restored-turn', tokenUsage => {
+                total => { totalTokens => 81_000, inputTokens => 70_000, cachedInputTokens => 15_000, outputTokens => 11_000, reasoningOutputTokens => 2_000 },
+                last => { totalTokens => 48_000, inputTokens => 42_000, cachedInputTokens => 8_000, outputTokens => 6_000, reasoningOutputTokens => 1_000 },
+                modelContextWindow => 258_000,
+            } } });
+            next;
+        }
     } elsif ($method eq 'thread/compact/start') {
         open my $compact_file, '>', "$cwd/last-compact.json" or die $!;
         print {$compact_file} encode_json($params);
@@ -419,6 +431,12 @@ while (my $line = <STDIN>) {
             $dynamic_thread = $thread;
             emit({ method => 'item/started', params => { threadId => $thread, turnId => $turn, item => { id => 'dynamic-fixture', type => 'dynamicToolCall', tool => 'lookup', namespace => 'records', arguments => { key => 'alpha' }, status => 'inProgress' } } });
             emit({ id => 704, method => 'item/tool/call', params => { threadId => $thread, turnId => $turn, callId => 'dynamic-fixture', tool => 'lookup', namespace => 'records', arguments => { key => 'alpha' }, futureField => { kept => JSON::PP::true() } } });
+        } elsif ($text eq 'USAGE') {
+            emit({ method => 'thread/tokenUsage/updated', params => { threadId => $thread, turnId => $turn, tokenUsage => {
+                total => { totalTokens => 101_000_000, inputTokens => 80_000_000, cachedInputTokens => 20_000_000, outputTokens => 21_000_000, reasoningOutputTokens => 5_000_000 },
+                last => { totalTokens => 64_000, inputTokens => 60_000, cachedInputTokens => 10_000, outputTokens => 4_000, reasoningOutputTokens => 1_000 },
+                modelContextWindow => 258_000,
+            } } });
         } else {
             emit({ method => 'item/agentMessage/delta', params => { threadId => $thread, turnId => $turn, itemId => 'message-1', delta => "BOT_FIXTURE_OK\n" } });
         }

@@ -225,10 +225,7 @@ pub(crate) fn session_usage_block_text(
         rows.push("  Note: usage is incomplete and may under-count.".to_string());
     }
 
-    join_header_rows(
-        "Session usage (since start or last resume):".to_string(),
-        rows,
-    )
+    join_header_rows("Session usage:".to_string(), rows)
 }
 
 /// Formats the cost cell. Ticks are 1e10 per USD; a partial sum is reported as absent.

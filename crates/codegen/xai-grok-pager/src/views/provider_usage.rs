@@ -1,61 +1,60 @@
-use bot_core::{ProviderUsage, UsageLimitWindow};
-use chrono::{DateTime, Utc};
+use bot_core::{ProviderUsage, UsageLimitWindow, format_reset_countdown};
+use chrono::Utc;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 
 use crate::theme::Theme;
 
 pub fn status_line(usage: &ProviderUsage, hovered: bool, theme: &Theme) -> Option<Line<'static>> {
-    let quota = usage.longest_window().map(|(_, window)| window);
-    if quota.is_none() && usage.lifetime_tokens.is_none() {
-        return None;
-    }
+    status_line_at(usage, hovered, theme, Utc::now().timestamp())
+}
+
+fn status_line_at(
+    usage: &ProviderUsage,
+    hovered: bool,
+    theme: &Theme,
+    now: i64,
+) -> Option<Line<'static>> {
+    let (_, window) = usage.longest_window()?;
     let modifier = if hovered {
         Modifier::BOLD
     } else {
         Modifier::empty()
     };
     let mut spans = Vec::new();
-    if let Some(window) = quota {
-        let remaining = window.remaining_percent();
-        let color = if remaining <= 5.0 {
-            theme.accent_error
-        } else if remaining <= 20.0 {
-            theme.warning
-        } else {
-            theme.accent_success
-        };
+    let remaining = window.remaining_percent();
+    let color = if remaining <= 5.0 {
+        theme.accent_error
+    } else if remaining <= 20.0 {
+        theme.warning
+    } else {
+        theme.accent_success
+    };
+    spans.push(Span::styled(
+        format!(
+            "{} {}% left",
+            compact_duration(window.duration_minutes),
+            format_percent(remaining)
+        ),
+        Style::default()
+            .fg(color)
+            .bg(theme.bg_base)
+            .add_modifier(modifier),
+    ));
+    if let Some(reset) = window.resets_at {
         spans.push(Span::styled(
-            format!(
-                "{} {}% left",
-                compact_duration(window.duration_minutes),
-                format_percent(remaining)
-            ),
-            Style::default()
-                .fg(color)
-                .bg(theme.bg_base)
-                .add_modifier(modifier),
-        ));
-    }
-    if let Some(tokens) = usage.lifetime_tokens {
-        if !spans.is_empty() {
-            spans.push(Span::styled(
-                " · ",
-                Style::default().fg(theme.gray_dim).bg(theme.bg_base),
-            ));
-        }
-        spans.push(Span::styled(
-            format!("{} tokens", compact_tokens(tokens)),
-            Style::default()
-                .fg(theme.text_secondary)
-                .bg(theme.bg_base)
-                .add_modifier(modifier),
+            format!(" · resets {}", format_reset_countdown(reset, now)),
+            Style::default().fg(theme.gray_dim).bg(theme.bg_base),
         ));
     }
     Some(Line::from(spans))
 }
 
 pub fn detail_lines(usage: &ProviderUsage, theme: &Theme) -> Vec<Line<'static>> {
+    detail_lines_at(usage, theme, Utc::now().timestamp())
+}
+
+fn detail_lines_at(usage: &ProviderUsage, theme: &Theme, now: i64) -> Vec<Line<'static>> {
     let header = Style::default()
         .fg(theme.text_primary)
         .add_modifier(Modifier::BOLD);
@@ -82,7 +81,7 @@ pub fn detail_lines(usage: &ProviderUsage, theme: &Theme) -> Vec<Line<'static>> 
             ]));
         }
         for window in &limit.windows {
-            lines.push(window_line(window, label, value));
+            lines.push(window_line(window, label, value, now));
         }
     }
     if usage.lifetime_tokens.is_none() && usage.limits.is_empty() {
@@ -102,11 +101,24 @@ pub fn detail_text(usage: &ProviderUsage, theme: &Theme) -> String {
         .join("\n")
 }
 
-fn window_line(window: &UsageLimitWindow, label_style: Style, value_style: Style) -> Line<'static> {
+#[cfg(test)]
+fn detail_text_at(usage: &ProviderUsage, theme: &Theme, now: i64) -> String {
+    detail_lines_at(usage, theme, now)
+        .into_iter()
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn window_line(
+    window: &UsageLimitWindow,
+    label_style: Style,
+    value_style: Style,
+    now: i64,
+) -> Line<'static> {
     let reset = window
         .resets_at
-        .and_then(timestamp)
-        .map(|time| format!(" · resets {}", time.format("%Y-%m-%d %H:%M UTC")))
+        .map(|time| format!(" · resets {}", format_reset_countdown(time, now)))
         .unwrap_or_default();
     Line::from(vec![
         Span::styled(
@@ -125,15 +137,6 @@ fn window_line(window: &UsageLimitWindow, label_style: Style, value_style: Style
             value_style,
         ),
     ])
-}
-
-fn timestamp(value: i64) -> Option<DateTime<Utc>> {
-    let seconds = if value.abs() >= 10_000_000_000 {
-        value / 1_000
-    } else {
-        value
-    };
-    DateTime::from_timestamp(seconds, 0)
 }
 
 fn compact_duration(minutes: Option<u64>) -> String {
@@ -164,23 +167,6 @@ fn format_percent(value: f64) -> String {
     } else {
         format!("{value:.1}")
     }
-}
-
-fn compact_tokens(tokens: u64) -> String {
-    if tokens >= 1_000_000_000 {
-        compact_decimal(tokens, 1_000_000_000, "B")
-    } else if tokens >= 1_000_000 {
-        compact_decimal(tokens, 1_000_000, "M")
-    } else if tokens >= 1_000 {
-        compact_decimal(tokens, 1_000, "k")
-    } else {
-        tokens.to_string()
-    }
-}
-
-fn compact_decimal(value: u64, divisor: u64, suffix: &str) -> String {
-    let scaled = value as f64 / divisor as f64;
-    format!("{scaled:.1}{suffix}").replace(&format!(".0{suffix}"), suffix)
 }
 
 fn format_integer(value: u64) -> String {
@@ -229,13 +215,14 @@ mod tests {
 
     #[test]
     fn snapshots_compact_status_content() {
-        let line = status_line(&usage(), false, &Theme::groknight()).expect("status line");
-        insta::assert_snapshot!(line.to_string(), @"7d 92% left · 1.2M tokens");
+        let line = status_line_at(&usage(), false, &Theme::groknight(), 1_789_152_000)
+            .expect("status line");
+        insta::assert_snapshot!(line.to_string(), @"7d 92% left · resets in 8 days");
     }
 
     #[test]
     fn snapshots_account_usage_details() {
-        let text = detail_text(&usage(), &Theme::groknight());
+        let text = detail_text_at(&usage(), &Theme::groknight(), 1_789_152_000);
         insta::assert_snapshot!(text, @r###"
         Account usage
         Provider: Codex
@@ -243,8 +230,8 @@ mod tests {
 
         Codex
         Model: gpt-5.6-sol
-        5 hours: 63% left · 37% used · resets 2026-09-12 18:40 UTC
-        7 days: 92% left · 8% used · resets 2026-09-19 18:40 UTC
+        5 hours: 63% left · 37% used · resets in 1 day
+        7 days: 92% left · 8% used · resets in 8 days
         "###);
     }
 
@@ -252,5 +239,14 @@ mod tests {
     fn omits_a_status_when_the_provider_returned_no_metrics() {
         let usage = ProviderUsage::unavailable(ProviderId::Claude);
         assert!(status_line(&usage, false, &Theme::groknight()).is_none());
+    }
+
+    #[test]
+    fn keeps_lifetime_tokens_in_details_without_using_header_space() {
+        let mut usage = usage();
+        usage.limits.clear();
+
+        assert!(status_line(&usage, false, &Theme::groknight()).is_none());
+        assert!(detail_text(&usage, &Theme::groknight()).contains("Lifetime tokens: 1,234,567"));
     }
 }

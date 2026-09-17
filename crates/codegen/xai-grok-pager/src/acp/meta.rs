@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 pub struct NotificationMeta {
     /// Accumulated token count across the session (`totalTokens`).
     pub total_tokens: Option<u64>,
+    pub session_total_tokens: Option<u64>,
     /// UTC ms when this notification was sent (`agentTimestampMs`).
     pub agent_timestamp_ms: Option<i64>,
     /// UTC ms when the current LLM streaming response started (`streamStartMs`).
@@ -102,6 +103,7 @@ impl NotificationMeta {
         let event_seq = event_id.as_deref().and_then(event_id_counter);
         Self {
             total_tokens: m.get("totalTokens").and_then(|v| v.as_u64()),
+            session_total_tokens: m.get("sessionTotalTokens").and_then(|v| v.as_u64()),
             agent_timestamp_ms: m.get("agentTimestampMs").and_then(|v| v.as_i64()),
             stream_start_ms: m.get("streamStartMs").and_then(|v| v.as_i64()),
             turn_start_ms: m.get("turnStartMs").and_then(|v| v.as_i64()),
@@ -125,6 +127,7 @@ mod tests {
     fn parse_full_meta() {
         let meta_json = json!({
             "totalTokens": 5000u64,
+            "sessionTotalTokens": 8000u64,
             "agentTimestampMs": 1700000000000i64,
             "streamStartMs": 1700000000000i64 - 3200,
             "turnStartMs": 1700000000000i64 - 5000,
@@ -134,6 +137,7 @@ mod tests {
         let meta = NotificationMeta::from_json(Some(map));
 
         assert_eq!(meta.total_tokens, Some(5000));
+        assert_eq!(meta.session_total_tokens, Some(8000));
         assert_eq!(meta.agent_timestamp_ms, Some(1700000000000));
         assert_eq!(meta.stream_start_ms, Some(1700000000000 - 3200));
         assert_eq!(meta.turn_start_ms, Some(1700000000000 - 5000));
@@ -153,6 +157,7 @@ mod tests {
         let meta = NotificationMeta::from_json(Some(map));
 
         assert_eq!(meta.total_tokens, Some(1000));
+        assert_eq!(meta.session_total_tokens, None);
         assert_eq!(meta.agent_timestamp_ms, Some(1700000000000));
         assert_eq!(meta.stream_start_ms, None);
         assert_eq!(meta.turn_start_ms, None);
@@ -209,6 +214,7 @@ mod tests {
     fn parse_none_meta() {
         let meta = NotificationMeta::from_json(None);
         assert_eq!(meta.total_tokens, None);
+        assert_eq!(meta.session_total_tokens, None);
         assert_eq!(meta.agent_timestamp_ms, None);
         assert_eq!(meta.stream_start_ms, None);
         assert_eq!(meta.turn_start_ms, None);

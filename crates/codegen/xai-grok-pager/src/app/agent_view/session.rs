@@ -38,6 +38,8 @@ impl AgentView {
             self.last_seen_event_seq = None;
             self.last_applied_event_seq = None;
             self.last_applied_xai_event_seq = None;
+            self.context_state = None;
+            self.session_total_tokens = None;
             self.deferred_subagent_finishes.clear();
             self.clear_minimal_btw_lifecycle();
         }
@@ -66,6 +68,8 @@ impl AgentView {
     pub(crate) fn unbind_session_id(&mut self) {
         if self.session.session_id.take().is_some() {
             self.session_binding_epoch = self.session_binding_epoch.wrapping_add(1);
+            self.context_state = None;
+            self.session_total_tokens = None;
             self.deferred_subagent_finishes.clear();
             self.clear_minimal_btw_lifecycle();
         }
@@ -163,6 +167,7 @@ impl AgentView {
             modal_buttons: Vec::new(),
             modal_hovered_key: None,
             context_state: None,
+            session_total_tokens: None,
             provider_usage: Some(bot_core::ProviderUsage::unavailable(
                 crate::provider::active_provider(),
             )),

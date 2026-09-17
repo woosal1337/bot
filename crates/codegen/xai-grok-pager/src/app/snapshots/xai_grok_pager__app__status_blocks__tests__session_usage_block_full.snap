@@ -2,7 +2,7 @@
 source: crates/codegen/xai-grok-pager/src/app/status_blocks.rs
 expression: text
 ---
-Session usage (since start or last resume):
+Session usage:
   Input tokens:   1,234,567 (1,000,000 cached)
   Output tokens:  45,678 (12,000 reasoning)
   Total tokens:   1,280,245

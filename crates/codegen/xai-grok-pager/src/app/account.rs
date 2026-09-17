@@ -1,4 +1,5 @@
-use chrono::{DateTime, Utc};
+use bot_core::format_reset_countdown;
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -59,6 +60,10 @@ pub struct ProviderCredits {
 
 impl ProviderAccountStatus {
     pub fn render_markdown(&self) -> String {
+        self.render_markdown_at(Utc::now().timestamp())
+    }
+
+    fn render_markdown_at(&self, now: i64) -> String {
         let mut lines = vec![format!("# {} account", self.provider), String::new()];
         lines.push(format!(
             "**Status:** {}",
@@ -98,10 +103,10 @@ impl ProviderAccountStatus {
                     lines.push(format!("**Model:** {model}"));
                 }
                 if let Some(primary) = &limit.primary {
-                    lines.push(format_window("Primary", primary));
+                    lines.push(format_window("Primary", primary, now));
                 }
                 if let Some(secondary) = &limit.secondary {
-                    lines.push(format_window("Secondary", secondary));
+                    lines.push(format_window("Secondary", secondary, now));
                 }
                 if let Some(credits) = &limit.credits {
                     lines.push(format_credits(credits));
@@ -127,7 +132,7 @@ impl ProviderAccountStatus {
     }
 }
 
-fn format_window(label: &str, window: &ProviderRateLimitWindow) -> String {
+fn format_window(label: &str, window: &ProviderRateLimitWindow, now: i64) -> String {
     let remaining = (100 - window.used_percent).clamp(0, 100);
     let duration = window
         .window_minutes
@@ -135,8 +140,7 @@ fn format_window(label: &str, window: &ProviderRateLimitWindow) -> String {
         .unwrap_or_else(|| label.to_owned());
     let reset = window
         .resets_at
-        .and_then(|timestamp| DateTime::<Utc>::from_timestamp(timestamp, 0))
-        .map(|time| format!(" · resets {}", time.format("%Y-%m-%d %H:%M UTC")))
+        .map(|time| format!(" · resets {}", format_reset_countdown(time, now)))
         .unwrap_or_default();
     format!(
         "**{duration}:** {remaining}% remaining ({}% used){reset}",
@@ -205,7 +209,7 @@ mod tests {
             }],
             rate_limits_error: None,
         }
-        .render_markdown();
+        .render_markdown_at(1_789_152_000);
         insta::assert_snapshot!(text, @r###"
         # Codex account
 
@@ -218,7 +222,7 @@ mod tests {
 
         ### Codex
         **Model:** gpt-5.6-sol
-        **5 hours:** 63% remaining (37% used) · resets 2026-09-12 18:40 UTC
+        **5 hours:** 63% remaining (37% used) · resets in 1 day
         **Credits:** 12.50
 
         **Included usage:** Available

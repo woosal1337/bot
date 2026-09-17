@@ -20,6 +20,13 @@ fn next_usage_fetch_nonce() -> u64 {
     USAGE_FETCH_NONCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
 }
 
+pub(super) fn supports_session_usage(provider: &crate::provider::ProviderId) -> bool {
+    matches!(
+        provider,
+        crate::provider::ProviderId::Grok | crate::provider::ProviderId::Codex
+    )
+}
+
 /// The agent's open usage modal state, if any.
 pub(super) fn usage_modal_state_mut(
     agent: &mut AgentView,
@@ -79,7 +86,7 @@ pub(super) fn open_usage_info_modal(
             show_resolved_model,
             nonce,
         });
-        if crate::provider::active_provider() == crate::provider::ProviderId::Grok {
+        if supports_session_usage(&crate::provider::active_provider()) {
             state.session_usage_pending = true;
             effects.push(Effect::FetchSessionUsage {
                 agent_id: id,
@@ -192,7 +199,7 @@ pub(super) fn dispatch_show_usage(app: &mut AppView) -> Vec<Effect> {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
-        if crate::provider::active_provider() != crate::provider::ProviderId::Grok {
+        if !supports_session_usage(&crate::provider::active_provider()) {
             let text = agent
                 .provider_usage
                 .as_ref()

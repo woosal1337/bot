@@ -687,6 +687,19 @@ fn usage_modal_state(app: &AppView) -> &crate::views::usage_modal::UsageInfoModa
 }
 
 #[test]
+fn session_usage_is_available_for_grok_and_codex() {
+    assert!(crate::app::dispatch::status::supports_session_usage(
+        &crate::provider::ProviderId::Grok
+    ));
+    assert!(crate::app::dispatch::status::supports_session_usage(
+        &crate::provider::ProviderId::Codex
+    ));
+    assert!(!crate::app::dispatch::status::supports_session_usage(
+        &crate::provider::ProviderId::Claude
+    ));
+}
+
+#[test]
 fn show_usage_opens_session_usage_tab_with_local_fetches() {
     let mut app = test_app_with_agent();
     let effects = dispatch(Action::ShowUsage, &mut app);

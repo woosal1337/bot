@@ -10,7 +10,8 @@ use anyhow::{Context, Result};
 use base64::Engine as _;
 use bot_core::{
     AgentEvent, PROVIDER_USAGE_UPDATED_METHOD, ProviderId as CoreProviderId, ProviderUsage,
-    ProviderUsageUpdate, ToolCallKind, ToolCallState, TurnOutcome, UsageLimit, UsageLimitWindow,
+    ProviderUsageUpdate, ToolCallKind, ToolCallState, TurnOutcome, Usage, UsageLimit,
+    UsageLimitWindow,
 };
 use bot_provider::{CommandKind, CommandOwnership};
 use bot_provider_codex::{
@@ -85,6 +86,9 @@ const SESSION_DELETE_METHOD: &str = "x.ai/session/delete";
 const SESSION_FORK_METHOD: &str = "x.ai/session/fork";
 const SESSION_RENAME_METHOD: &str = "x.ai/session/rename";
 const SESSION_SEARCH_METHOD: &str = "x.ai/session/search";
+const SESSION_INFO_METHOD: &str = "x.ai/session/info";
+const SESSION_USAGE_METHOD: &str = "x.ai/session/usage";
+const THREAD_TOKEN_USAGE_UPDATED_METHOD: &str = "thread/tokenUsage/updated";
 const REWIND_EXECUTE_METHOD: &str = "x.ai/rewind/execute";
 const REWIND_POINTS_METHOD: &str = "x.ai/rewind/points";
 const SKILLS_LIST_METHOD: &str = "x.ai/skills/list";
@@ -216,6 +220,14 @@ struct CodexSession {
     permission_mode: CodexPermissionMode,
     turn_state: CodexTurnState,
     mode: CollaborationModeKind,
+    usage: Option<Usage>,
+    turns: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexSessionRequest {
+    session_id: String,
 }
 
 #[derive(Clone)]
@@ -679,6 +691,72 @@ impl CodexAcpAgent {
             .await;
     }
 
+    async fn notify_usage(&self, session_id: &acp::SessionId, usage: Usage) {
+        let Some(size) = usage.context_window else {
+            return;
+        };
+        let meta = json!({"sessionTotalTokens": usage.total_tokens})
+            .as_object()
+            .cloned();
+        let notification = acp::SessionNotification::new(
+            session_id.clone(),
+            acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(usage.context_tokens, size)),
+        )
+        .meta(meta);
+        let _ = self.gateway.session_notification(notification).await;
+    }
+
+    async fn apply_usage(&self, session_id: &acp::SessionId, usage: Usage) {
+        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+            session.usage = Some(usage);
+        }
+        self.notify_usage(session_id, usage).await;
+    }
+
+    async fn restore_session_usage(
+        &self,
+        session_id: &acp::SessionId,
+        events: &mut broadcast::Receiver<CodexEvent>,
+    ) {
+        let Ok(core_session_id) = bot_core::SessionId::new(session_id.0.to_string()) else {
+            return;
+        };
+        let mut normalizer = CodexEventNormalizer::new(core_session_id);
+        let restored = tokio::time::timeout(std::time::Duration::from_millis(250), async {
+            loop {
+                let event = match events.recv().await {
+                    Ok(event) => event,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(broadcast::error::RecvError::Closed) => return None,
+                };
+                let CodexEvent::Notification(notification) = &event else {
+                    continue;
+                };
+                if notification.method != THREAD_TOKEN_USAGE_UPDATED_METHOD
+                    || notification.params.get("threadId").and_then(Value::as_str)
+                        != Some(session_id.0.as_ref())
+                {
+                    continue;
+                }
+                if let Some(usage) = normalizer.normalize(&event).into_iter().find_map(|event| {
+                    if let AgentEvent::UsageChanged { usage, .. } = event {
+                        Some(usage)
+                    } else {
+                        None
+                    }
+                }) {
+                    return Some(usage);
+                }
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+        if let Some(usage) = restored {
+            self.apply_usage(session_id, usage).await;
+        }
+    }
+
     async fn notify_provider_usage(&self, session_id: &acp::SessionId) {
         let update = ProviderUsageUpdate {
             session_id: session_id.0.to_string(),
@@ -876,16 +954,7 @@ impl CodexAcpAgent {
                         self.notify(session_id, update).await;
                     }
                     AgentEvent::UsageChanged { usage, .. } => {
-                        if let Some(size) = usage.context_window {
-                            self.notify(
-                                session_id,
-                                acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(
-                                    usage.input_tokens.saturating_add(usage.output_tokens),
-                                    size,
-                                )),
-                            )
-                            .await;
-                        }
+                        self.apply_usage(session_id, usage).await;
                     }
                     AgentEvent::Warning { message, .. } => {
                         self.notify(
@@ -899,6 +968,9 @@ impl CodexAcpAgent {
                     }
                     AgentEvent::Error { message, .. } => return Err(acp_error(&message)),
                     AgentEvent::TurnCompleted { outcome, .. } => {
+                        if let Some(session) = self.sessions.borrow_mut().get_mut(session_id) {
+                            session.turns = session.turns.saturating_add(1);
+                        }
                         if let Some(turn_diff) = pending_turn_diff.take() {
                             for (_, call) in
                                 turn_diff_calls(session_id, &turn_diff, &item_file_paths)
@@ -2161,6 +2233,80 @@ impl CodexAcpAgent {
             .ok_or_else(|| acp::Error::resource_not_found(Some(session_id.to_owned())))
     }
 
+    fn session_info(&self, params: &str) -> Result<acp::ExtResponse, acp::Error> {
+        let request: CodexSessionRequest = serde_json::from_str(params)
+            .map_err(|error| acp::Error::invalid_params().data(error.to_string()))?;
+        let session_id = acp::SessionId::new(request.session_id.clone());
+        let sessions = self.sessions.borrow();
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| acp::Error::resource_not_found(Some(request.session_id)))?;
+        let context = session
+            .usage
+            .map(|usage| {
+                xai_grok_shell::session::ContextInfo::from_notification(
+                    usage.context_tokens,
+                    usage.context_window.unwrap_or_default(),
+                )
+            })
+            .unwrap_or_default();
+        let response = xai_grok_shell::session::SessionInfoResponse {
+            session_id: session_id.0.to_string(),
+            cwd: session.cwd.to_string_lossy().into_owned(),
+            data: xai_grok_shell::session::SessionInfoData {
+                agent_name: Some("codex".to_owned()),
+                model: Some(session.model.clone()),
+                model_display_name: self
+                    .models
+                    .iter()
+                    .find(|model| model.model == session.model)
+                    .map(|model| model.display_name.clone()),
+                resolved_model_id: None,
+                model_fingerprint: None,
+                show_model_fingerprint: false,
+                api_backend: Some("Codex app-server".to_owned()),
+                conversation_id: Some(session.thread_id.clone()),
+                turns: session.turns,
+                turn_index: session.turns.saturating_sub(1),
+                context,
+            },
+        };
+        raw_ext_response(&xai_grok_shell::session::ExtMethodResult::success(response))
+    }
+
+    fn session_usage(&self, params: &str) -> Result<acp::ExtResponse, acp::Error> {
+        let request: CodexSessionRequest = serde_json::from_str(params)
+            .map_err(|error| acp::Error::invalid_params().data(error.to_string()))?;
+        let session_id = acp::SessionId::new(request.session_id.clone());
+        let sessions = self.sessions.borrow();
+        let session = sessions
+            .get(&session_id)
+            .ok_or_else(|| acp::Error::resource_not_found(Some(request.session_id)))?;
+        let mut prompt_usage = xai_grok_shell::extensions::notification::PromptUsage {
+            num_turns: session.turns,
+            ..Default::default()
+        };
+        if let Some(usage) = session.usage {
+            let model_calls = session.turns.max(u64::from(usage.total_tokens > 0));
+            let totals = xai_grok_shell::extensions::notification::PromptUsageModel {
+                input_tokens: usage.input_tokens,
+                output_tokens: usage.output_tokens,
+                total_tokens: usage.total_tokens,
+                cached_read_tokens: usage.cached_input_tokens,
+                reasoning_tokens: usage.reasoning_output_tokens,
+                model_calls,
+                ..Default::default()
+            };
+            prompt_usage.totals = totals.clone();
+            prompt_usage
+                .model_usage
+                .insert(session.model.clone(), totals);
+        }
+        raw_ext_response(&xai_grok_shell::extensions::usage::SessionUsageResponse {
+            usage: prompt_usage,
+        })
+    }
+
     async fn interrupt_codex_turn(
         &self,
         thread_id: String,
@@ -2303,6 +2449,8 @@ impl acp::Agent for CodexAcpAgent {
                 permission_mode,
                 turn_state: CodexTurnState::Idle,
                 mode: CollaborationModeKind::Default,
+                usage: None,
+                turns: 0,
             },
         );
         self.refresh_provider_usage(&session_id).await;
@@ -2316,6 +2464,7 @@ impl acp::Agent for CodexAcpAgent {
         args: acp::LoadSessionRequest,
     ) -> Result<acp::LoadSessionResponse, acp::Error> {
         let permission_mode = *self.default_permission_mode.borrow();
+        let mut events = self.client.subscribe();
         let resumed = self
             .client
             .resume_thread(&ThreadResumeParams {
@@ -2332,6 +2481,7 @@ impl acp::Agent for CodexAcpAgent {
         let effort = resumed.reasoning_effort;
         let thread_id = resumed.thread.id.clone();
         let turns = resumed.thread.turns;
+        let turn_count = turns.len() as u64;
         let cwd = if resumed.cwd.as_os_str().is_empty() {
             args.cwd
         } else {
@@ -2352,9 +2502,15 @@ impl acp::Agent for CodexAcpAgent {
                 permission_mode,
                 turn_state: CodexTurnState::Idle,
                 mode: CollaborationModeKind::Default,
+                usage: None,
+                turns: turn_count,
             },
         );
         self.refresh_provider_usage(&args.session_id).await;
+        if turn_count > 0 {
+            self.restore_session_usage(&args.session_id, &mut events)
+                .await;
+        }
         for turn in &turns {
             for update in replay_updates(&args.session_id, std::slice::from_ref(turn)) {
                 self.notify(&args.session_id, update).await;
@@ -2654,6 +2810,8 @@ impl acp::Agent for CodexAcpAgent {
             SESSION_FORK_METHOD => self.fork_session(args.params.get()).await,
             SESSION_RENAME_METHOD => self.rename_session(args.params.get()).await,
             SESSION_SEARCH_METHOD => self.search_sessions(args.params.get()).await,
+            SESSION_INFO_METHOD => self.session_info(args.params.get()),
+            SESSION_USAGE_METHOD => self.session_usage(args.params.get()),
             SKILLS_LIST_METHOD => self.skills_list(args.params.get()).await,
             SKILLS_TOGGLE_METHOD => self.skills_toggle(args.params.get()).await,
             _ => Err(acp::Error::method_not_found()),
@@ -4369,6 +4527,173 @@ mod tests {
         .await
         .unwrap()
         .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reports_live_context_and_cumulative_session_usage_separately() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let directory = tempfile::tempdir().unwrap();
+                let (mut channel, agent_channel) = acp_channels();
+                let usage_updates = Rc::new(RefCell::new(Vec::new()));
+                let captured = usage_updates.clone();
+                let receiver = tokio::task::spawn_local(async move {
+                    while let Some(message) = channel.rx.recv().await {
+                        match message.boxed() {
+                            xai_acp_lib::AcpClientMessageBox::SessionNotification(args) => {
+                                if let acp::SessionUpdate::UsageUpdate(usage) = &args.request.update
+                                {
+                                    let session_total = args
+                                        .request
+                                        .meta
+                                        .as_ref()
+                                        .and_then(|meta| meta.get("sessionTotalTokens"))
+                                        .and_then(Value::as_u64);
+                                    captured.borrow_mut().push((
+                                        usage.used,
+                                        usage.size,
+                                        session_total,
+                                    ));
+                                }
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            _ => panic!("unexpected client request"),
+                        }
+                    }
+                });
+                let agent = CodexAcpAgent::start(
+                    codex_fixture(),
+                    agent_channel.tx,
+                    CodexPermissionMode::Default,
+                )
+                .await
+                .unwrap();
+                let session_id = agent
+                    .new_session(acp::NewSessionRequest::new(directory.path().to_path_buf()))
+                    .await
+                    .unwrap()
+                    .session_id;
+                let response = prompt_fixture(&agent, &session_id, "USAGE").await;
+                assert_eq!(response.stop_reason, acp::StopReason::EndTurn);
+                assert_eq!(
+                    usage_updates.borrow().as_slice(),
+                    &[(64_000, 258_000, Some(101_000_000))]
+                );
+
+                let params = serde_json::value::to_raw_value(&json!({
+                    "sessionId": session_id.0.to_string()
+                }))
+                .unwrap();
+                let info = agent
+                    .ext_method(acp::ExtRequest::new(
+                        SESSION_INFO_METHOD,
+                        params.clone().into(),
+                    ))
+                    .await
+                    .unwrap();
+                let info: xai_grok_shell::session::ExtMethodResult<
+                    xai_grok_shell::session::SessionInfoResponse,
+                > = serde_json::from_str(info.0.get()).unwrap();
+                let info = info.result.unwrap();
+                assert_eq!(info.data.context.used, 64_000);
+                assert_eq!(info.data.context.total, 258_000);
+                assert_eq!(info.data.turns, 1);
+
+                let usage = agent
+                    .ext_method(acp::ExtRequest::new(SESSION_USAGE_METHOD, params.into()))
+                    .await
+                    .unwrap();
+                let usage: xai_grok_shell::extensions::usage::SessionUsageResponse =
+                    serde_json::from_str(usage.0.get()).unwrap();
+                assert_eq!(usage.usage.totals.total_tokens, 101_000_000);
+                assert_eq!(usage.usage.totals.cached_read_tokens, 20_000_000);
+                assert_eq!(usage.usage.totals.reasoning_tokens, 5_000_000);
+                assert_eq!(usage.usage.num_turns, 1);
+
+                agent.client.close().await.unwrap();
+                receiver.abort();
+            })
+            .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn restores_context_and_session_usage_when_a_codex_thread_resumes() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let directory = tempfile::tempdir().unwrap();
+                let (mut channel, agent_channel) = acp_channels();
+                let usage_updates = Rc::new(RefCell::new(Vec::new()));
+                let captured = usage_updates.clone();
+                let receiver = tokio::task::spawn_local(async move {
+                    while let Some(message) = channel.rx.recv().await {
+                        match message.boxed() {
+                            xai_acp_lib::AcpClientMessageBox::SessionNotification(args) => {
+                                if let acp::SessionUpdate::UsageUpdate(usage) = &args.request.update
+                                {
+                                    let session_total = args
+                                        .request
+                                        .meta
+                                        .as_ref()
+                                        .and_then(|meta| meta.get("sessionTotalTokens"))
+                                        .and_then(Value::as_u64);
+                                    captured.borrow_mut().push((
+                                        usage.used,
+                                        usage.size,
+                                        session_total,
+                                    ));
+                                }
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            _ => panic!("unexpected client request"),
+                        }
+                    }
+                });
+                let agent = CodexAcpAgent::start(
+                    codex_fixture(),
+                    agent_channel.tx,
+                    CodexPermissionMode::Default,
+                )
+                .await
+                .unwrap();
+                let session_id = acp::SessionId::new("bot-fixture-resume-usage");
+                agent
+                    .load_session(acp::LoadSessionRequest::new(
+                        session_id.clone(),
+                        directory.path().to_path_buf(),
+                    ))
+                    .await
+                    .unwrap();
+
+                assert_eq!(agent.sessions.borrow()[&session_id].turns, 1);
+                tokio::time::timeout(std::time::Duration::from_secs(1), async {
+                    while usage_updates.borrow().is_empty() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .unwrap();
+                assert_eq!(
+                    usage_updates.borrow().as_slice(),
+                    &[(48_000, 258_000, Some(81_000))]
+                );
+                let session = agent.sessions.borrow()[&session_id].clone();
+                let usage = session.usage.unwrap();
+                assert_eq!(usage.context_tokens, 48_000);
+                assert_eq!(usage.total_tokens, 81_000);
+                assert_eq!(usage.context_window, Some(258_000));
+
+                agent.client.close().await.unwrap();
+                receiver.abort();
+            })
+            .await;
     }
 
     #[cfg(unix)]

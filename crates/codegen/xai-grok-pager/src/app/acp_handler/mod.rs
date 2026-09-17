@@ -211,6 +211,9 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         if let Some(tokens) = meta.total_tokens {
                             confirm_context_used(agent, tokens);
                         }
+                        if let Some(tokens) = meta.session_total_tokens {
+                            agent.session_total_tokens = Some(tokens);
+                        }
                         if let Some(ts) = meta.turn_start_ms {
                             agent.turn_start_ms = Some(ts);
                             agent.turn_start_ms_prompt = meta.prompt_id.clone();
@@ -427,6 +430,9 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         ack_prompt_from_update(child_view, &meta);
                         if let Some(tokens) = meta.total_tokens {
                             confirm_context_used(child_view, tokens);
+                        }
+                        if let Some(tokens) = meta.session_total_tokens {
+                            child_view.session_total_tokens = Some(tokens);
                         }
                         if let Some(ts) = meta.turn_start_ms {
                             child_view.turn_start_ms = Some(ts);

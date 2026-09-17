@@ -45,6 +45,33 @@
     }
 
     #[test]
+    fn handle_keeps_session_total_separate_from_live_context() {
+        let mut app = make_app_with_agent("sess-usage");
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let request = acp::SessionNotification::new(
+            acp::SessionId::new("sess-usage"),
+            acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(64_000, 258_000)),
+        )
+        .meta(serde_json::json!({
+            "sessionTotalTokens": 101_000_000,
+        }).as_object().cloned());
+
+        assert!(handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request,
+                response_tx: tx,
+            }),
+            &mut app,
+        ));
+
+        let agent = &app.agents[&AgentId(0)];
+        let context = agent.context_state.as_ref().expect("context state");
+        assert_eq!(context.used, 64_000);
+        assert_eq!(context.total, 258_000);
+        assert_eq!(agent.session_total_tokens, Some(101_000_000));
+    }
+
+    #[test]
     fn handle_routes_tokens_to_root_when_session_id_not_yet_set() {
         // Regression: a notification racing ahead of TaskResult::SessionCreated (session_id still None) must update the active agent,
         // not be dropped into the empty subagent_views path

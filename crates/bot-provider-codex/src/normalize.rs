@@ -398,11 +398,48 @@ impl CodexEventNormalizer {
     fn usage_changed(&self, params: &Value) -> Option<AgentEvent> {
         let usage = params.get("tokenUsage")?;
         let total = usage.get("total")?;
+        let last = usage.get("last")?;
         Some(AgentEvent::UsageChanged {
             session_id: self.session_id.clone(),
             usage: Usage {
                 input_tokens: total.get("inputTokens")?.as_u64()?,
+                cached_input_tokens: total
+                    .get("cachedInputTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
                 output_tokens: total.get("outputTokens")?.as_u64()?,
+                reasoning_output_tokens: total
+                    .get("reasoningOutputTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default(),
+                total_tokens: total
+                    .get("totalTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| {
+                        total
+                            .get("inputTokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default()
+                            .saturating_add(
+                                total
+                                    .get("outputTokens")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or_default(),
+                            )
+                    }),
+                context_tokens: last
+                    .get("totalTokens")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_else(|| {
+                        last.get("inputTokens")
+                            .and_then(Value::as_u64)
+                            .unwrap_or_default()
+                            .saturating_add(
+                                last.get("outputTokens")
+                                    .and_then(Value::as_u64)
+                                    .unwrap_or_default(),
+                            )
+                    }),
                 context_window: usage.get("modelContextWindow").and_then(Value::as_u64),
             },
         })
@@ -1214,8 +1251,14 @@ mod tests {
                 "threadId": "thread-1",
                 "turnId": "turn-1",
                 "tokenUsage": {
-                    "total": {"inputTokens": 120, "outputTokens": 40},
-                    "last": {"inputTokens": 12, "outputTokens": 4},
+                    "total": {
+                        "totalTokens": 160,
+                        "inputTokens": 120,
+                        "cachedInputTokens": 20,
+                        "outputTokens": 40,
+                        "reasoningOutputTokens": 10
+                    },
+                    "last": {"totalTokens": 16, "inputTokens": 12, "outputTokens": 4},
                     "modelContextWindow": 200000
                 }
             }),
@@ -1223,7 +1266,13 @@ mod tests {
         assert!(matches!(
             &normalizer.normalize(&event)[0],
             AgentEvent::UsageChanged { usage, .. }
-                if usage.input_tokens == 120 && usage.output_tokens == 40 && usage.context_window == Some(200000)
+                if usage.input_tokens == 120
+                    && usage.cached_input_tokens == 20
+                    && usage.output_tokens == 40
+                    && usage.reasoning_output_tokens == 10
+                    && usage.total_tokens == 160
+                    && usage.context_tokens == 16
+                    && usage.context_window == Some(200000)
         ));
     }
 

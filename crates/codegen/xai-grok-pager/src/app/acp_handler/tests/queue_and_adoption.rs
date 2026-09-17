@@ -1955,6 +1955,8 @@
         agent.last_seen_event_id = Some("sess-a-7".into());
         agent.last_applied_event_seq = Some(7);
         agent.last_applied_xai_event_seq = Some(8);
+        agent.apply_context_used(42_000, 258_000);
+        agent.session_total_tokens = Some(81_000);
         let lifecycle = {
             let reduction = crate::app::subagent::SubagentLifecycleState::default().reduce(
                 crate::app::subagent::SubagentLifecycleTransition::Finished,
@@ -1985,6 +1987,8 @@
         assert_eq!(agent.last_seen_event_id.as_deref(), Some("sess-a-7"));
         assert_eq!(agent.last_applied_event_seq, Some(7));
         assert_eq!(agent.last_applied_xai_event_seq, Some(8));
+        assert_eq!(agent.context_state.as_ref().map(|state| state.used), Some(42_000));
+        assert_eq!(agent.session_total_tokens, Some(81_000));
         assert_eq!(agent.deferred_subagent_finishes.len(), 1);
 
         agent.bind_session_id(acp::SessionId::new("sess-b"));
@@ -1999,6 +2003,8 @@
         );
         assert!(agent.last_applied_event_seq.is_none());
         assert!(agent.last_applied_xai_event_seq.is_none());
+        assert!(agent.context_state.is_none());
+        assert!(agent.session_total_tokens.is_none());
         assert!(
             agent.deferred_subagent_finishes.is_empty(),
             "deferred finishes are meaningless against another session"
@@ -2010,9 +2016,13 @@
         let mut agent = make_agent(None);
         assert_eq!(agent.session_binding_epoch, 0);
         agent.bind_session_id(acp::SessionId::new("a"));
+        agent.apply_context_used(10, 100);
+        agent.session_total_tokens = Some(20);
         assert_eq!(agent.session_binding_epoch, 1);
         agent.unbind_session_id();
         assert_eq!(agent.session_binding_epoch, 2);
+        assert!(agent.context_state.is_none());
+        assert!(agent.session_total_tokens.is_none());
         agent.bind_session_id(acp::SessionId::new("a"));
         assert_eq!(agent.session_binding_epoch, 3);
     }

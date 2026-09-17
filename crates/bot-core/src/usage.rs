@@ -40,8 +40,56 @@ impl ProviderUsage {
         self.limits
             .iter()
             .flat_map(|limit| limit.windows.iter().map(move |window| (limit, window)))
-            .max_by_key(|(_, window)| window.duration_minutes.unwrap_or_default())
+            .max_by(|(_, left), (_, right)| {
+                left.duration_minutes
+                    .unwrap_or_default()
+                    .cmp(&right.duration_minutes.unwrap_or_default())
+                    .then_with(|| left.used_percent.total_cmp(&right.used_percent))
+            })
     }
+}
+
+pub fn format_reset_countdown(resets_at: i64, now: i64) -> String {
+    let reset_seconds = if resets_at.unsigned_abs() >= 10_000_000_000 {
+        resets_at / 1_000
+    } else {
+        resets_at
+    };
+    let remaining = reset_seconds.saturating_sub(now);
+    if remaining <= 0 {
+        return "due now".to_owned();
+    }
+    let days = remaining / 86_400;
+    let hours = remaining % 86_400 / 3_600;
+    let minutes = remaining % 3_600 / 60;
+    if days > 0 {
+        return format_countdown_parts(days, "day", hours, "hour");
+    }
+    if hours > 0 {
+        return format_countdown_parts(hours, "hour", minutes, "minute");
+    }
+    if minutes > 0 {
+        return format!("in {}", plural(minutes, "minute"));
+    }
+    "in less than 1 minute".to_owned()
+}
+
+fn format_countdown_parts(
+    primary: i64,
+    primary_unit: &str,
+    secondary: i64,
+    secondary_unit: &str,
+) -> String {
+    let primary = plural(primary, primary_unit);
+    if secondary > 0 {
+        format!("in {primary} and {}", plural(secondary, secondary_unit))
+    } else {
+        format!("in {primary}")
+    }
+}
+
+fn plural(value: i64, unit: &str) -> String {
+    format!("{value} {unit}{}", if value == 1 { "" } else { "s" })
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -106,6 +154,51 @@ mod tests {
         let (_, selected) = usage.longest_window().expect("quota window");
         assert_eq!(selected.label, "Secondary");
         assert_eq!(selected.remaining_percent(), 60.0);
+    }
+
+    #[test]
+    fn selects_the_most_used_window_when_durations_match() {
+        let usage = ProviderUsage {
+            provider: ProviderId::Codex,
+            lifetime_tokens: None,
+            limits: vec![
+                UsageLimit {
+                    id: Some("codex".to_owned()),
+                    name: "Codex".to_owned(),
+                    model: None,
+                    windows: vec![window("7 days", 90.0, Some(10_080))],
+                },
+                UsageLimit {
+                    id: Some("spark".to_owned()),
+                    name: "Spark".to_owned(),
+                    model: Some("gpt-5.3-codex-spark".to_owned()),
+                    windows: vec![window("7 days", 0.0, Some(10_080))],
+                },
+            ],
+            extensions: BTreeMap::new(),
+        };
+
+        let (_, selected) = usage.longest_window().expect("quota window");
+        assert_eq!(selected.used_percent, 90.0);
+    }
+
+    #[test]
+    fn formats_reset_countdowns_for_days_hours_and_minutes() {
+        let now = 1_000_000;
+        assert_eq!(
+            format_reset_countdown(now + 176_400, now),
+            "in 2 days and 1 hour"
+        );
+        assert_eq!(
+            format_reset_countdown(now + 7_380, now),
+            "in 2 hours and 3 minutes"
+        );
+        assert_eq!(format_reset_countdown(now + 180, now), "in 3 minutes");
+        assert_eq!(
+            format_reset_countdown(now + 30, now),
+            "in less than 1 minute"
+        );
+        assert_eq!(format_reset_countdown(now - 1, now), "due now");
     }
 
     #[test]

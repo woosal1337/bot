@@ -1525,6 +1525,15 @@ impl AgentView {
         }) {
             status.push("credits", line);
         }
+        if let Some(tokens) = self.session_total_tokens {
+            status.push(
+                "session_tokens",
+                Line::from(Span::styled(
+                    format!("{} session", context_bar::fmt_tokens(tokens)),
+                    Style::default().fg(theme.text_secondary).bg(theme.bg_base),
+                )),
+            );
+        }
         let ctx_used = self.context_state.as_ref().map(|c| c.used);
         let model_window = self.session.models.get_context_window();
         let ctx_total = self

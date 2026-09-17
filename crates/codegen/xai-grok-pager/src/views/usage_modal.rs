@@ -856,10 +856,6 @@ fn context_tab_lines(state: &UsageInfoModalState, theme: &Theme, width: u16) -> 
 
 fn session_usage_lines(state: &UsageInfoModalState, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    if let Some(usage) = &state.provider_usage {
-        lines.extend(crate::views::provider_usage::detail_lines(usage, theme));
-        lines.push(Line::default());
-    }
     if let Some(usage_text) = &state.session_usage_text {
         for (i, row) in usage_text.lines().enumerate() {
             if i == 0 {
@@ -870,10 +866,14 @@ fn session_usage_lines(state: &UsageInfoModalState, theme: &Theme) -> Vec<Line<'
         }
     } else if state.session_usage_pending {
         lines.push(muted_line(theme, "Loading session usage\u{2026}"));
-    } else if lines.is_empty() && state.ctx.session_id.is_none() {
+    } else if state.ctx.session_id.is_none() {
         lines.push(muted_line(theme, "No active session."));
-    } else if lines.is_empty() {
-        lines.push(muted_line(theme, "Usage data is unavailable."));
+    } else {
+        lines.push(muted_line(theme, "Session usage data is unavailable."));
+    }
+    if let Some(usage) = &state.provider_usage {
+        lines.push(Line::default());
+        lines.extend(crate::views::provider_usage::detail_lines(usage, theme));
     }
     lines
 }
@@ -1024,8 +1024,19 @@ mod tests {
         assert!(lines[0].to_string().contains("Loading session usage"));
         state.session_usage_pending = false;
         state.session_usage_text = Some("Session usage: 42 input tokens".to_string());
+        state.provider_usage = Some(bot_core::ProviderUsage {
+            provider: bot_core::ProviderId::Codex,
+            lifetime_tokens: Some(1_234_567),
+            limits: Vec::new(),
+            extensions: Default::default(),
+        });
         let lines = session_usage_lines(&state, &theme);
         assert_eq!(lines[0].to_string(), "Session usage: 42 input tokens");
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.to_string() == "Lifetime tokens: 1,234,567")
+        );
     }
 
     #[test]

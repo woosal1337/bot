@@ -71,7 +71,11 @@ pub enum TurnOutcome {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Usage {
     pub input_tokens: u64,
+    pub cached_input_tokens: u64,
     pub output_tokens: u64,
+    pub reasoning_output_tokens: u64,
+    pub total_tokens: u64,
+    pub context_tokens: u64,
     pub context_window: Option<u64>,
 }
 
