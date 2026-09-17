@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
 use bot_provider_codex::{
-    AccountLoginCompletedNotification, AccountRateLimitsResponse, AccountReadParams,
-    AccountUpdatedNotification, CancelLoginAccountParams, ClientInfo,
-    CommandExecutionApprovalDecision, CommandExecutionRequestApprovalResponse,
+    ACCOUNT_USAGE_READ_METHOD, AccountLoginCompletedNotification, AccountRateLimitsResponse,
+    AccountReadParams, AccountUpdatedNotification, AccountUsageResponse, CancelLoginAccountParams,
+    ClientInfo, CommandExecutionApprovalDecision, CommandExecutionRequestApprovalResponse,
     ConfigValueWriteParams, DynamicToolCallOutputContentItem, DynamicToolCallParams,
     DynamicToolCallResponse, DynamicToolNamespaceTool, DynamicToolSpec, FileChangeApprovalDecision,
     FileChangeRequestApprovalResponse, HookEventName, HookHandlerMetadata, HookSource,
@@ -905,6 +905,32 @@ fn decodes_account_rate_limits_and_preserves_unknown_fields() {
     );
     assert_eq!(limits.rate_limits.extra["futureSnapshotField"], true);
     assert_eq!(limits.extra["futureResponseField"], "kept");
+}
+
+#[test]
+fn decodes_account_usage_and_preserves_unknown_fields() {
+    let usage: AccountUsageResponse =
+        serde_json::from_str(include_str!("fixtures/account-usage-response.json"))
+            .expect("account usage");
+    let summary = usage.summary.expect("usage summary");
+    assert_eq!(summary.lifetime_tokens, Some(1_234_567));
+    assert_eq!(summary.extra["futureSummaryField"], true);
+    let buckets = usage.daily_usage_buckets.expect("daily usage buckets");
+    assert_eq!(buckets[0].start_date, "2026-06-18");
+    assert_eq!(buckets[0].tokens, 12_345);
+    assert_eq!(buckets[0].extra["futureBucketField"], "kept");
+    assert_eq!(usage.extra["futureResponseField"], 7);
+}
+
+#[test]
+fn encodes_account_usage_read_request() {
+    let line = encode_request(RequestId::Number(9), ACCOUNT_USAGE_READ_METHOD, &())
+        .expect("account usage request");
+    let value: Value = serde_json::from_str(&line).expect("JSON line");
+    assert_eq!(
+        value,
+        json!({"id": 9, "method": "account/usage/read", "params": null})
+    );
 }
 
 #[test]

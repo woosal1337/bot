@@ -224,6 +224,43 @@ pub struct AccountRateLimitsResponse {
     pub extra: BTreeMap<String, Value>,
 }
 
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsageResponse {
+    #[serde(default)]
+    pub summary: Option<AccountUsageSummary>,
+    #[serde(default)]
+    pub daily_usage_buckets: Option<Vec<AccountUsageDailyBucket>>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsageSummary {
+    #[serde(default)]
+    pub lifetime_tokens: Option<u64>,
+    #[serde(default)]
+    pub peak_daily_tokens: Option<u64>,
+    #[serde(default)]
+    pub longest_running_turn_sec: Option<u64>,
+    #[serde(default)]
+    pub current_streak_days: Option<u64>,
+    #[serde(default)]
+    pub longest_streak_days: Option<u64>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountUsageDailyBucket {
+    pub start_date: String,
+    pub tokens: u64,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, Value>,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitSnapshot {

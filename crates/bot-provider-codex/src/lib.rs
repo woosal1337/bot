@@ -15,9 +15,10 @@ pub use message::{
 pub use normalize::{CodexEventNormalizer, historical_tool_call};
 pub use protocol::{
     Account, AccountLoginCompletedNotification, AccountRateLimitsResponse, AccountReadParams,
-    AccountReadResponse, AccountUpdatedNotification, CancelLoginAccountParams,
-    CancelLoginAccountResponse, CancelLoginAccountStatus, ClientInfo, CollaborationMode,
-    CollaborationModeKind, CollaborationModeSettings, CommandExecutionApprovalDecision,
+    AccountReadResponse, AccountUpdatedNotification, AccountUsageDailyBucket, AccountUsageResponse,
+    AccountUsageSummary, CancelLoginAccountParams, CancelLoginAccountResponse,
+    CancelLoginAccountStatus, ClientInfo, CollaborationMode, CollaborationModeKind,
+    CollaborationModeSettings, CommandExecutionApprovalDecision,
     CommandExecutionRequestApprovalResponse, ConfigValueWriteParams, CreditsSnapshot,
     DynamicToolCallOutputContentItem, DynamicToolCallParams, DynamicToolCallResponse,
     DynamicToolNamespaceTool, DynamicToolSpec, FileChangeApprovalDecision,
@@ -58,6 +59,7 @@ pub const ACCOUNT_LOGIN_COMPLETED_NOTIFICATION: &str = "account/login/completed"
 pub const ACCOUNT_LOGOUT_METHOD: &str = "account/logout";
 pub const ACCOUNT_RATE_LIMITS_READ_METHOD: &str = "account/rateLimits/read";
 pub const ACCOUNT_RATE_LIMITS_UPDATED_NOTIFICATION: &str = "account/rateLimits/updated";
+pub const ACCOUNT_USAGE_READ_METHOD: &str = "account/usage/read";
 pub const ACCOUNT_UPDATED_NOTIFICATION: &str = "account/updated";
 pub const MODEL_LIST_METHOD: &str = "model/list";
 pub const ITEM_TOOL_CALL_METHOD: &str = "item/tool/call";

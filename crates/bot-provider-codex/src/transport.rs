@@ -17,29 +17,29 @@ use tokio::time::{Duration, timeout};
 
 use crate::{
     ACCOUNT_LOGIN_CANCEL_METHOD, ACCOUNT_LOGIN_START_METHOD, ACCOUNT_LOGOUT_METHOD,
-    ACCOUNT_RATE_LIMITS_READ_METHOD, ACCOUNT_READ_METHOD, AccountRateLimitsResponse,
-    AccountReadParams, AccountReadResponse, CONFIG_VALUE_WRITE_METHOD, CancelLoginAccountParams,
-    CancelLoginAccountResponse, ConfigValueWriteParams, HOOKS_LIST_METHOD, HooksListParams,
-    HooksListResponse, INITIALIZE_METHOD, INITIALIZED_METHOD, IncomingMessage, InitializeParams,
-    InitializeResponse, LoginAccountParams, LoginAccountResponse, LogoutAccountResponse,
-    MCP_SERVER_RELOAD_METHOD, MCP_SERVER_STATUS_LIST_METHOD, MODEL_LIST_METHOD,
-    McpServerRefreshResponse, McpServerStatusListParams, McpServerStatusListResponse,
-    ModelListParams, ModelListResponse, PLUGIN_INSTALL_METHOD, PLUGIN_LIST_METHOD,
-    PLUGIN_RECONCILE_METHOD, PLUGIN_UNINSTALL_METHOD, PluginInstallParams, PluginListParams,
-    PluginListResponse, PluginReconcileParams, PluginUninstallParams, ProtocolError, RemoteError,
-    RequestId, SKILLS_CONFIG_WRITE_METHOD, SKILLS_LIST_METHOD, ServerNotification, ServerRequest,
-    ServerResponse, SkillsConfigWriteParams, SkillsConfigWriteResponse, SkillsListParams,
-    SkillsListResponse, THREAD_COMPACT_START_METHOD, THREAD_DELETE_METHOD, THREAD_FORK_METHOD,
-    THREAD_LIST_METHOD, THREAD_RESUME_METHOD, THREAD_REVERT_METHOD, THREAD_SEARCH_METHOD,
-    THREAD_SET_NAME_METHOD, THREAD_START_METHOD, THREAD_TURNS_LIST_METHOD, TURN_INTERRUPT_METHOD,
-    TURN_START_METHOD, TURN_STEER_METHOD, ThreadCompactStartParams, ThreadCompactStartResponse,
-    ThreadDeleteParams, ThreadDeleteResponse, ThreadForkParams, ThreadForkResponse,
-    ThreadListParams, ThreadListResponse, ThreadResumeParams, ThreadResumeResponse,
-    ThreadRevertParams, ThreadRevertResponse, ThreadSearchParams, ThreadSearchResponse,
-    ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams, ThreadStartResponse,
-    ThreadTurnsListParams, ThreadTurnsListResponse, TurnInterruptParams, TurnInterruptResponse,
-    TurnStartParams, TurnStartResponse, TurnSteerParams, TurnSteerResponse, decode_line,
-    encode_error_response, encode_notification, encode_request, encode_response,
+    ACCOUNT_RATE_LIMITS_READ_METHOD, ACCOUNT_READ_METHOD, ACCOUNT_USAGE_READ_METHOD,
+    AccountRateLimitsResponse, AccountReadParams, AccountReadResponse, AccountUsageResponse,
+    CONFIG_VALUE_WRITE_METHOD, CancelLoginAccountParams, CancelLoginAccountResponse,
+    ConfigValueWriteParams, HOOKS_LIST_METHOD, HooksListParams, HooksListResponse,
+    INITIALIZE_METHOD, INITIALIZED_METHOD, IncomingMessage, InitializeParams, InitializeResponse,
+    LoginAccountParams, LoginAccountResponse, LogoutAccountResponse, MCP_SERVER_RELOAD_METHOD,
+    MCP_SERVER_STATUS_LIST_METHOD, MODEL_LIST_METHOD, McpServerRefreshResponse,
+    McpServerStatusListParams, McpServerStatusListResponse, ModelListParams, ModelListResponse,
+    PLUGIN_INSTALL_METHOD, PLUGIN_LIST_METHOD, PLUGIN_RECONCILE_METHOD, PLUGIN_UNINSTALL_METHOD,
+    PluginInstallParams, PluginListParams, PluginListResponse, PluginReconcileParams,
+    PluginUninstallParams, ProtocolError, RemoteError, RequestId, SKILLS_CONFIG_WRITE_METHOD,
+    SKILLS_LIST_METHOD, ServerNotification, ServerRequest, ServerResponse, SkillsConfigWriteParams,
+    SkillsConfigWriteResponse, SkillsListParams, SkillsListResponse, THREAD_COMPACT_START_METHOD,
+    THREAD_DELETE_METHOD, THREAD_FORK_METHOD, THREAD_LIST_METHOD, THREAD_RESUME_METHOD,
+    THREAD_REVERT_METHOD, THREAD_SEARCH_METHOD, THREAD_SET_NAME_METHOD, THREAD_START_METHOD,
+    THREAD_TURNS_LIST_METHOD, TURN_INTERRUPT_METHOD, TURN_START_METHOD, TURN_STEER_METHOD,
+    ThreadCompactStartParams, ThreadCompactStartResponse, ThreadDeleteParams, ThreadDeleteResponse,
+    ThreadForkParams, ThreadForkResponse, ThreadListParams, ThreadListResponse, ThreadResumeParams,
+    ThreadResumeResponse, ThreadRevertParams, ThreadRevertResponse, ThreadSearchParams,
+    ThreadSearchResponse, ThreadSetNameParams, ThreadSetNameResponse, ThreadStartParams,
+    ThreadStartResponse, ThreadTurnsListParams, ThreadTurnsListResponse, TurnInterruptParams,
+    TurnInterruptResponse, TurnStartParams, TurnStartResponse, TurnSteerParams, TurnSteerResponse,
+    decode_line, encode_error_response, encode_notification, encode_request, encode_response,
 };
 
 type PendingResponse = oneshot::Sender<Result<Value, CodexTransportError>>;
@@ -214,6 +214,10 @@ impl CodexClient {
         &self,
     ) -> Result<AccountRateLimitsResponse, CodexTransportError> {
         self.request(ACCOUNT_RATE_LIMITS_READ_METHOD, &()).await
+    }
+
+    pub async fn account_usage(&self) -> Result<AccountUsageResponse, CodexTransportError> {
+        self.request(ACCOUNT_USAGE_READ_METHOD, &()).await
     }
 
     pub async fn models(
