@@ -1083,7 +1083,7 @@ fn real_end_marker_stays_plain_with_running_work() {
     );
 
     let block = last_marker_block(&agent);
-    assert_eq!(block.event.message(), "✓ Turn complete · 2.0s");
+    assert_eq!(block.event.message(), "✓ Task finished · 2.0s");
     assert_eq!(
         agent.watchers().commands,
         1,
@@ -1103,7 +1103,7 @@ fn workless_marker_renders_completion_receipt() {
     );
 
     let block = last_marker_block(&agent);
-    assert_eq!(block.event.message(), "✓ Turn complete · 2.0s");
+    assert_eq!(block.event.message(), "✓ Task finished · 2.0s");
 }
 
 // ── Send-now cancel marker suppression (viewer finalize rail) ────────
@@ -1221,7 +1221,7 @@ fn turn_end_after_park_pushes_single_marker() {
     );
     assert_eq!(
         last_marker_block(&agent).event.message(),
-        "✓ Turn complete · 5.0s"
+        "✓ Task finished · 5.0s"
     );
 }
 

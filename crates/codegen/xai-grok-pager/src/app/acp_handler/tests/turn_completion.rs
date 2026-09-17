@@ -1490,7 +1490,7 @@
         let agent = app.agents.get(&AgentId(0)).unwrap();
         match last_session_event(&agent.scrollback) {
             Some(ev @ SessionEvent::TurnCompleted { elapsed: None }) => {
-                assert_eq!(ev.message(), "✓ Turn complete");
+                assert_eq!(ev.message(), "✓ Task finished");
             }
             other => panic!("expected markerless-elapsed completed, got {other:?}"),
         }

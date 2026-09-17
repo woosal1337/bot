@@ -318,12 +318,12 @@ impl SessionEvent {
             SessionEvent::TurnCompleted {
                 elapsed: Some(elapsed),
             } => TurnReceipt {
-                label: "✓ Turn complete",
+                label: "✓ Task finished",
                 detail: format!(" · {}", format_duration(*elapsed)),
                 tone: TurnReceiptTone::Complete,
             },
             SessionEvent::TurnCompleted { elapsed: None } => TurnReceipt {
-                label: "✓ Turn complete",
+                label: "✓ Task finished",
                 detail: String::new(),
                 tone: TurnReceiptTone::Complete,
             },
@@ -666,7 +666,7 @@ mod tests {
         let event = SessionEvent::TurnCompleted {
             elapsed: Some(Duration::from_secs(125)),
         };
-        assert_eq!(event.message(), "✓ Turn complete · 2m5s");
+        assert_eq!(event.message(), "✓ Task finished · 2m5s");
     }
 
     #[test]
@@ -761,7 +761,7 @@ mod tests {
     fn turn_receipts_snapshot_wide() {
         insta::assert_snapshot!(turn_receipt_snapshot(80), @r###"
         complete:
-        ✓ Turn complete · 2m5s
+        ✓ Task finished · 2m5s
 
         stopped:
         ■ Turn stopped · Cancelled by user · 10s
@@ -778,7 +778,7 @@ mod tests {
     fn turn_receipts_snapshot_narrow() {
         insta::assert_snapshot!(turn_receipt_snapshot(24), @r###"
         complete:
-        ✓ Turn complete · 2m5s
+        ✓ Task finished · 2m5s
 
         stopped:
         ■ Turn stopped ·
