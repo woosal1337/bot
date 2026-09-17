@@ -4619,13 +4619,15 @@ mod tests {
                                 let _ = args.response_tx.send(Ok(()));
                             }
                             xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
-                                received.borrow_mut().push(json!({
-                                    "method": args.request.method.as_ref(),
-                                    "params": serde_json::from_str::<Value>(
-                                        args.request.params.get()
-                                    )
-                                    .unwrap(),
-                                }));
+                                if args.request.method.as_ref() != PROVIDER_USAGE_UPDATED_METHOD {
+                                    received.borrow_mut().push(json!({
+                                        "method": args.request.method.as_ref(),
+                                        "params": serde_json::from_str::<Value>(
+                                            args.request.params.get()
+                                        )
+                                        .unwrap(),
+                                    }));
+                                }
                                 let _ = args.response_tx.send(Ok(()));
                             }
                             _ => panic!("unexpected client request"),
@@ -6137,6 +6139,10 @@ mod tests {
                                     args.response_tx.send(Ok(acp::ExtResponse::new(raw.into())));
                             }
                             xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
+                                if args.request.method.as_ref() == PROVIDER_USAGE_UPDATED_METHOD {
+                                    let _ = args.response_tx.send(Ok(()));
+                                    continue;
+                                }
                                 assert_eq!(
                                     args.request.method.as_ref(),
                                     "x.ai/mcp/elicit_complete"
@@ -6240,6 +6246,12 @@ mod tests {
                                     args.response_tx.send(Ok(acp::ExtResponse::new(raw.into())));
                             }
                             xai_acp_lib::AcpClientMessageBox::SessionNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            xai_acp_lib::AcpClientMessageBox::ExtNotification(args)
+                                if args.request.method.as_ref()
+                                    == PROVIDER_USAGE_UPDATED_METHOD =>
+                            {
                                 let _ = args.response_tx.send(Ok(()));
                             }
                             _ => panic!("unexpected client request"),
