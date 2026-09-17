@@ -13698,7 +13698,7 @@ dependencies = [
 
 [[package]]
 name = "xai-grok-pager-bin"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "bot-core",
