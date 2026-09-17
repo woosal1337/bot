@@ -43,12 +43,16 @@ if [ -z "$expected" ]; then
     exit 1
 fi
 
-if command -v sha256sum >/dev/null 2>&1; then
-    printf '%s  %s\n' "$expected" "$archive_path" | sha256sum --check --status
-elif command -v shasum >/dev/null 2>&1; then
-    printf '%s  %s\n' "$expected" "$archive_path" | shasum -a 256 --check --status
+if command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$archive_path" | awk '{ print $1 }')"
+elif command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$archive_path" | awk '{ print $1 }')"
 else
     printf '%s\n' "Bot needs sha256sum or shasum to verify the download." >&2
+    exit 1
+fi
+if [ "$actual" != "$expected" ]; then
+    printf '%s\n' "Bot could not verify the download checksum." >&2
     exit 1
 fi
 
