@@ -71,6 +71,7 @@ const AUTH_CANCEL_METHOD: &str = "x.ai/auth/cancel";
 const AUTH_GET_URL_METHOD: &str = "x.ai/auth/get_url";
 const AUTH_LOGOUT_METHOD: &str = "x.ai/auth/logout";
 const ACCOUNT_STATUS_METHOD: &str = "x.ai/account/read";
+const BTW_METHOD: &str = "x.ai/btw";
 const COMPACT_CONVERSATION_METHOD: &str = "x.ai/compact_conversation";
 const COMMANDS_LIST_METHOD: &str = "x.ai/commands/list";
 const INTERJECT_METHOD: &str = "x.ai/interject";
@@ -144,6 +145,13 @@ struct CodexInterjectRequest {
     text: String,
     interjection_id: String,
     content: Option<Vec<acp::ContentBlock>>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CodexBtwRequest {
+    session_id: String,
+    question: String,
 }
 
 #[derive(Deserialize)]
@@ -1594,6 +1602,125 @@ impl CodexAcpAgent {
         Ok(acp::ExtResponse::new(raw.into()))
     }
 
+    async fn btw(&self, params: &str) -> Result<acp::ExtResponse, acp::Error> {
+        let request: CodexBtwRequest = serde_json::from_str(params)
+            .map_err(|error| acp::Error::invalid_params().data(error.to_string()))?;
+        let question = request.question.trim();
+        if question.is_empty() {
+            return Err(acp::Error::invalid_params().data("The side question must not be blank"));
+        }
+        let session = self.ext_session_id(&request.session_id)?;
+        let fork = self
+            .client
+            .fork_thread(&ThreadForkParams {
+                thread_id: session.thread_id.clone(),
+                cwd: Some(session.cwd.to_string_lossy().into_owned()),
+            })
+            .await
+            .map_err(acp::Error::into_internal_error)?;
+        let fork_id = fork.thread.id;
+        let result = self.btw_answer(&session, &fork_id, question).await;
+        if let Err(error) = self
+            .client
+            .delete_thread(&ThreadDeleteParams { thread_id: fork_id })
+            .await
+        {
+            tracing::warn!(error = %error, "Failed to delete the Codex side-question thread");
+        }
+        let answer = result?;
+        raw_ext_response(&json!({"result": {"answer": answer}}))
+    }
+
+    async fn btw_answer(
+        &self,
+        session: &CodexSession,
+        thread_id: &str,
+        question: &str,
+    ) -> Result<String, acp::Error> {
+        let mut events = self.client.subscribe();
+        let turn = self
+            .client
+            .start_turn(&TurnStartParams {
+                thread_id: thread_id.to_owned(),
+                input: vec![UserInput::Text {
+                    text: question.to_owned(),
+                    text_elements: Vec::new(),
+                }],
+                model: Some(session.model.clone()),
+                effort: session.effort.clone(),
+                summary: Some(ReasoningSummary::None),
+                cwd: Some(session.cwd.to_string_lossy().into_owned()),
+                client_user_message_id: None,
+                approval_policy: CodexPermissionMode::ReadOnly.approval_policy(),
+                approvals_reviewer: CodexPermissionMode::ReadOnly.approvals_reviewer(),
+                sandbox_policy: CodexPermissionMode::ReadOnly.sandbox_policy(),
+                collaboration_mode: Some(CollaborationMode {
+                    mode: CollaborationModeKind::Default,
+                    settings: CollaborationModeSettings {
+                        model: session.model.clone(),
+                        reasoning_effort: session.effort.clone(),
+                        developer_instructions: Some(
+                            "Answer only the side question. Do not use tools or modify files."
+                                .to_owned(),
+                        ),
+                    },
+                }),
+            })
+            .await
+            .map_err(acp::Error::into_internal_error)?;
+        let turn_id = turn.turn.id;
+        let mut answer = String::new();
+        loop {
+            let event = match events.recv().await {
+                Ok(event) => event,
+                Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(broadcast::error::RecvError::Closed) => {
+                    return Err(acp_error("Codex app-server closed its event stream"));
+                }
+            };
+            if !event_matches(&event, thread_id, &turn_id) {
+                continue;
+            }
+            match event {
+                CodexEvent::Notification(notification)
+                    if notification.method == "item/agentMessage/delta" =>
+                {
+                    if let Some(delta) = notification.params.get("delta").and_then(Value::as_str) {
+                        answer.push_str(delta);
+                    }
+                }
+                CodexEvent::Notification(notification)
+                    if notification.method == "turn/completed" =>
+                {
+                    let status = notification
+                        .params
+                        .get("turn")
+                        .and_then(|turn| turn.get("status"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("unknown");
+                    if status != "completed" {
+                        return Err(acp_error(format!(
+                            "Codex side question ended with status {status}"
+                        )));
+                    }
+                    let answer = answer.trim().to_owned();
+                    if answer.is_empty() {
+                        return Err(acp_error("Codex returned no side-question answer"));
+                    }
+                    return Ok(answer);
+                }
+                CodexEvent::Request(request) => {
+                    self.client
+                        .respond_error(request.id, -32601, "Side questions cannot run tools", None)
+                        .await
+                        .map_err(acp::Error::into_internal_error)?;
+                }
+                CodexEvent::ConnectionClosed(message) => return Err(acp_error(message)),
+                CodexEvent::Notification(_) | CodexEvent::UnmatchedResponse(_) => {}
+            }
+        }
+    }
+
     async fn mcp_list(&self, params: &str) -> Result<acp::ExtResponse, acp::Error> {
         let params: Value = serde_json::from_str(params)
             .map_err(|error| acp::Error::invalid_params().data(error.to_string()))?;
@@ -2512,6 +2639,7 @@ impl acp::Agent for CodexAcpAgent {
                 raw_ext_response(&json!({"ok": true}))
             }
             COMPACT_CONVERSATION_METHOD => self.compact_conversation(args.params.get()).await,
+            BTW_METHOD => self.btw(args.params.get()).await,
             COMMANDS_LIST_METHOD => self.commands_list(args.params.get()).await,
             INTERJECT_METHOD => self.interject(args.params.get()).await,
             HOOKS_ACTION_METHOD => self.hooks_action(args.params.get()).await,
@@ -4741,6 +4869,91 @@ mod tests {
                         .await
                         .is_err()
                 );
+
+                agent.client.close().await.unwrap();
+                receiver.abort();
+            })
+            .await;
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn answers_a_side_question_on_a_temporary_codex_fork() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let directory = tempfile::tempdir().unwrap();
+                let (mut channel, agent_channel) = acp_channels();
+                let receiver = tokio::task::spawn_local(async move {
+                    while let Some(message) = channel.rx.recv().await {
+                        match message.boxed() {
+                            xai_acp_lib::AcpClientMessageBox::SessionNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            _ => panic!("unexpected client request"),
+                        }
+                    }
+                });
+                let agent = CodexAcpAgent::start(
+                    codex_fixture(),
+                    agent_channel.tx,
+                    CodexPermissionMode::Default,
+                )
+                .await
+                .unwrap();
+                let session_id = agent
+                    .new_session(acp::NewSessionRequest::new(directory.path().to_path_buf()))
+                    .await
+                    .unwrap()
+                    .session_id;
+                agent
+                    .sessions
+                    .borrow_mut()
+                    .get_mut(&session_id)
+                    .unwrap()
+                    .turn_state = CodexTurnState::Active {
+                    turn_id: "active-main-turn".to_owned(),
+                };
+                let params = json!({
+                    "sessionId": session_id.0.to_string(),
+                    "question": "What changed?",
+                });
+                let response = agent
+                    .ext_method(acp::ExtRequest::new(
+                        BTW_METHOD,
+                        serde_json::value::to_raw_value(&params).unwrap().into(),
+                    ))
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    serde_json::from_str::<Value>(response.0.get()).unwrap(),
+                    json!({"result": {"answer": "BOT_FIXTURE_OK"}})
+                );
+                let fork: Value = serde_json::from_slice(
+                    &std::fs::read(directory.path().join("last-thread-fork.json")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(
+                    fork,
+                    json!({
+                        "threadId": session_id.0.to_string(),
+                        "cwd": directory.path(),
+                    })
+                );
+                let turn: Value = serde_json::from_slice(
+                    &std::fs::read(directory.path().join("last-turn.json")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(turn["threadId"], "bot-fixture-fork-2");
+                assert_eq!(turn["input"][0]["text"], "What changed?");
+                assert_eq!(turn["sandboxPolicy"], json!({"type": "readOnly"}));
+                let deleted: Value = serde_json::from_slice(
+                    &std::fs::read(directory.path().join("last-thread-delete.json")).unwrap(),
+                )
+                .unwrap();
+                assert_eq!(deleted, json!({"threadId": "bot-fixture-fork-2"}));
 
                 agent.client.close().await.unwrap();
                 receiver.abort();
