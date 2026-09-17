@@ -163,7 +163,9 @@ impl AgentView {
             modal_buttons: Vec::new(),
             modal_hovered_key: None,
             context_state: None,
-            provider_usage: None,
+            provider_usage: Some(bot_core::ProviderUsage::unavailable(
+                crate::provider::active_provider(),
+            )),
             status_context: None,
             last_status_line_size: None,
             chat_kind: false,

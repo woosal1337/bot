@@ -1,4 +1,7 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::ProviderId;
 
@@ -19,9 +22,20 @@ pub struct ProviderUsage {
     pub lifetime_tokens: Option<u64>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub limits: Vec<UsageLimit>,
+    #[serde(flatten)]
+    pub extensions: BTreeMap<String, Value>,
 }
 
 impl ProviderUsage {
+    pub fn unavailable(provider: ProviderId) -> Self {
+        Self {
+            provider,
+            lifetime_tokens: None,
+            limits: Vec::new(),
+            extensions: BTreeMap::new(),
+        }
+    }
+
     pub fn longest_window(&self) -> Option<(&UsageLimit, &UsageLimitWindow)> {
         self.limits
             .iter()
@@ -86,6 +100,7 @@ mod tests {
                     window("Secondary", 40.0, Some(10_080)),
                 ],
             }],
+            extensions: BTreeMap::new(),
         };
 
         let (_, selected) = usage.longest_window().expect("quota window");
@@ -101,15 +116,24 @@ mod tests {
 
     #[test]
     fn serializes_provider_usage_for_adapter_boundaries() {
-        let usage = ProviderUsage {
-            provider: ProviderId::Codex,
-            lifetime_tokens: None,
-            limits: Vec::new(),
-        };
+        let usage = ProviderUsage::unavailable(ProviderId::Codex);
 
         let value = serde_json::to_value(&usage).expect("serialize usage");
         assert_eq!(value["provider"], "codex");
         assert!(value.get("lifetimeTokens").is_none());
         assert!(value.get("limits").is_none());
+    }
+
+    #[test]
+    fn preserves_provider_specific_extensions() {
+        let usage: ProviderUsage = serde_json::from_value(serde_json::json!({
+            "provider": "codex",
+            "providerMeter": {"remaining": 42}
+        }))
+        .expect("provider usage");
+
+        assert_eq!(usage.extensions["providerMeter"]["remaining"], 42);
+        let value = serde_json::to_value(usage).expect("serialize provider usage");
+        assert_eq!(value["providerMeter"]["remaining"], 42);
     }
 }

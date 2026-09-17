@@ -442,11 +442,7 @@ impl CodexAcpAgent {
             pending_elicitations: RefCell::new(HashMap::new()),
             pending_login: RefCell::new(None),
             default_permission_mode: RefCell::new(permission_mode),
-            provider_usage: RefCell::new(ProviderUsage {
-                provider: CoreProviderId::Codex,
-                lifetime_tokens: None,
-                limits: Vec::new(),
-            }),
+            provider_usage: RefCell::new(ProviderUsage::unavailable(CoreProviderId::Codex)),
         })
     }
 
@@ -567,6 +563,7 @@ impl CodexAcpAgent {
                         .await
                         .map_err(acp::Error::into_internal_error)?;
                     self.account.replace(account);
+                    self.refresh_all_provider_usage().await;
                     return Ok(acp::AuthenticateResponse::new());
                 }
                 Ok(CodexEvent::ConnectionClosed(message)) => {
@@ -703,6 +700,26 @@ impl CodexAcpAgent {
             }
         }
         self.notify_provider_usage(session_id).await;
+    }
+
+    async fn refresh_all_provider_usage(&self) {
+        let session_ids = self.sessions.borrow().keys().cloned().collect::<Vec<_>>();
+        let Some((first, rest)) = session_ids.split_first() else {
+            return;
+        };
+        self.refresh_provider_usage(first).await;
+        for session_id in rest {
+            self.notify_provider_usage(session_id).await;
+        }
+    }
+
+    async fn clear_provider_usage(&self) {
+        self.provider_usage
+            .replace(ProviderUsage::unavailable(CoreProviderId::Codex));
+        let session_ids = self.sessions.borrow().keys().cloned().collect::<Vec<_>>();
+        for session_id in &session_ids {
+            self.notify_provider_usage(session_id).await;
+        }
     }
 
     async fn stream_turn(
@@ -2275,7 +2292,6 @@ impl acp::Agent for CodexAcpAgent {
             }
         };
         let turn_id = turn.turn.id;
-        self.refresh_provider_usage(&args.session_id).await;
         let pending_cancel =
             if let Some(session) = self.sessions.borrow_mut().get_mut(&args.session_id) {
                 let previous = std::mem::replace(
@@ -2333,6 +2349,7 @@ impl acp::Agent for CodexAcpAgent {
         if let Some(session) = self.sessions.borrow_mut().get_mut(&args.session_id) {
             session.turn_state = CodexTurnState::Idle;
         }
+        self.refresh_provider_usage(&args.session_id).await;
         let mut response = acp::PromptResponse::new(stop_reason?);
         if let Some(message_id) = args.message_id {
             response = response.user_message_id(message_id);
@@ -2483,6 +2500,7 @@ impl acp::Agent for CodexAcpAgent {
                     .await
                     .map_err(acp::Error::into_internal_error)?;
                 self.account.replace(account);
+                self.clear_provider_usage().await;
                 raw_ext_response(&json!({"ok": true}))
             }
             COMPACT_CONVERSATION_METHOD => self.compact_conversation(args.params.get()).await,
@@ -4350,6 +4368,7 @@ mod tests {
             provider: CoreProviderId::Codex,
             lifetime_tokens: Some(1_234_567),
             limits: map_usage_limits(response),
+            extensions: BTreeMap::new(),
         };
         let (limit, window) = usage.longest_window().expect("quota window");
         assert_eq!(limit.name, "Codex");

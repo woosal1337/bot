@@ -17,6 +17,7 @@ fn notification(session_id: &str) -> acp::ExtNotification {
                     resets_at: None,
                 }],
             }],
+            extensions: Default::default(),
         },
     };
     let raw = serde_json::value::to_raw_value(&update).unwrap();
@@ -54,6 +55,9 @@ fn ignores_provider_usage_for_an_unknown_session() {
     assert!(
         app.agents
             .get(&AgentId(0))
-            .is_some_and(|agent| agent.provider_usage.is_none())
+            .and_then(|agent| agent.provider_usage.as_ref())
+            .is_some_and(|usage| usage.provider == bot_core::ProviderId::Grok
+                && usage.lifetime_tokens.is_none()
+                && usage.limits.is_empty())
     );
 }

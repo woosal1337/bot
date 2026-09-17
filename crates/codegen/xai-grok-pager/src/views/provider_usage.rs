@@ -223,6 +223,7 @@ mod tests {
                     },
                 ],
             }],
+            extensions: Default::default(),
         }
     }
 
@@ -249,11 +250,7 @@ mod tests {
 
     #[test]
     fn omits_a_status_when_the_provider_returned_no_metrics() {
-        let usage = ProviderUsage {
-            provider: ProviderId::Claude,
-            lifetime_tokens: None,
-            limits: Vec::new(),
-        };
+        let usage = ProviderUsage::unavailable(ProviderId::Claude);
         assert!(status_line(&usage, false, &Theme::groknight()).is_none());
     }
 }
