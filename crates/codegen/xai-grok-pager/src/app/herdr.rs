@@ -58,9 +58,12 @@ impl Reporter {
                 last_snapshot: None,
             };
         };
+        let starting = Snapshot::starting();
+        let sequence = sequence_seed();
+        report(&config, sequence, &starting);
         let (sender, receiver) = mpsc::channel();
         let worker = std::thread::spawn(move || {
-            let mut sequence = sequence_seed();
+            let mut sequence = sequence;
             let mut session_id = None;
             while let Ok(message) = receiver.recv() {
                 match message {
@@ -86,7 +89,7 @@ impl Reporter {
         Self {
             sender: Some(sender),
             worker: Some(worker),
-            last_snapshot: None,
+            last_snapshot: Some(starting),
         }
     }
 
@@ -139,6 +142,13 @@ impl Config {
 }
 
 impl Snapshot {
+    fn starting() -> Self {
+        Self {
+            state: LifecycleState::Working,
+            session_id: None,
+        }
+    }
+
     fn from_app(app: &AppView) -> Self {
         let blocked = !matches!(app.auth_state, AuthState::Done)
             || matches!(app.trust_state, TrustState::Pending { .. })
@@ -293,6 +303,17 @@ mod tests {
         assert_eq!(resolve_state(true, true), LifecycleState::Blocked);
         assert_eq!(resolve_state(false, true), LifecycleState::Working);
         assert_eq!(resolve_state(false, false), LifecycleState::Idle);
+    }
+
+    #[test]
+    fn startup_claim_precedes_provider_session_identity() {
+        assert_eq!(
+            Snapshot::starting(),
+            Snapshot {
+                state: LifecycleState::Working,
+                session_id: None,
+            }
+        );
     }
 
     #[test]

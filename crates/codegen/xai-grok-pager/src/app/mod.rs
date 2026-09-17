@@ -569,6 +569,7 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
     let provider_state = crate::provider::require_ready(&args.provider)?;
     let requested_provider = provider_state.id().clone();
     crate::provider::set_active_provider(requested_provider.clone());
+    let herdr_reporter = herdr::Reporter::from_env();
     if let Some(value) = args.permission_mode_flag.as_deref() {
         let term = crate::provider::parse_permission_term(&requested_provider, value).ok_or_else(
             || {
@@ -1107,6 +1108,7 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
         remote_settings,
         term_state,
         materialized,
+        herdr_reporter,
         writer_event_rx,
     )
     .await;

@@ -1129,6 +1129,7 @@ pub(crate) async fn run(
     remote_settings: Option<xai_grok_shell::util::config::RemoteSettings>,
     mut term_state: TerminalState,
     materialized: crate::app::session_startup::MaterializedStartup,
+    mut herdr_reporter: super::herdr::Reporter,
     mut writer_event_rx: tokio::sync::mpsc::UnboundedReceiver<WriterEvent>,
 ) -> anyhow::Result<RunResult> {
     crate::unified_log::init(connection.tx.clone());
@@ -1732,7 +1733,6 @@ pub(crate) async fn run(
     // It also precedes the reader thread start, for the type-ahead gate just below
     // Feature-off (kill-switch / opt-out / local build) resolves `Trusted`, so this stays `TrustState::Done`
     seed_trust_state(&mut app, remote_settings.as_ref());
-    let mut herdr_reporter = super::herdr::Reporter::from_env();
     herdr_reporter.sync(&app);
     // Type-ahead captured while the app was still loading (see `init_terminal`), replayed only when the composer is already the active consumer
     // A startup screen still being up means the keys are dropped, not replayed
