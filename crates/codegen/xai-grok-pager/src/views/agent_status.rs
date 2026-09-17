@@ -1,3 +1,4 @@
+// Modified by the Bot project on 2026-09-17: preserve rightmost status metrics on small terminals.
 //! [`AgentStatusBar`] collects items as `Line<'static>` spans, lays them out right-aligned with dim `│` separators, and renders into a buffer row.
 //! Returns hit-test areas keyed by item ID.
 //!
@@ -83,10 +84,17 @@ impl<'a> AgentStatusBar<'a> {
         let sep = self.separator();
         let sep_w = sep.width() as u16; // 3
 
-        // Total width: items plus the separators *between* them only; no leading separator before the first item or trailing one after the last
-        let items_width: u16 = self.items.iter().map(|e| e.width).sum();
-        let num_seps = (self.items.len() as u16).saturating_sub(1);
-        let total_width = items_width + num_seps * sep_w;
+        let available_width = area.width.saturating_sub(self.right_pad);
+        let mut first = 0;
+        let mut total_width = self.items.iter().map(|entry| entry.width).sum::<u16>()
+            + (self.items.len() as u16).saturating_sub(1) * sep_w;
+        while total_width > available_width && first + 1 < self.items.len() {
+            total_width = total_width
+                .saturating_sub(self.items[first].width)
+                .saturating_sub(sep_w);
+            first += 1;
+        }
+        total_width = total_width.min(available_width);
 
         // Right-align: compute starting x
         let start_x = area
@@ -96,25 +104,26 @@ impl<'a> AgentStatusBar<'a> {
         let mut x = start_x;
         let mut areas = HashMap::new();
 
-        for (i, entry) in self.items.iter().enumerate() {
-            // Separator before every item except the first.
+        for (i, entry) in self.items[first..].iter().enumerate() {
             if i > 0 {
                 buf.set_span(x, area.y, &sep, sep_w);
                 x += sep_w;
             }
 
-            // Render item
-            buf.set_line(x, area.y, &entry.line, entry.width);
+            let paint_width = entry
+                .width
+                .min(area.x.saturating_add(area.width).saturating_sub(x));
+            buf.set_line(x, area.y, &entry.line, paint_width);
             areas.insert(
                 entry.id,
                 Rect {
                     x,
                     y: area.y,
-                    width: entry.width,
+                    width: paint_width,
                     height: 1,
                 },
             );
-            x += entry.width;
+            x += paint_width;
         }
 
         areas
@@ -897,5 +906,24 @@ mod tests {
         let row: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
         assert_eq!(row.trim(), "XX");
         assert!(!row.contains(SEPARATOR));
+    }
+
+    #[test]
+    fn status_bar_keeps_rightmost_metrics_on_small_terminals() {
+        let theme = Theme::current();
+        let mut bar = AgentStatusBar::new(&theme);
+        bar.push("tasks", Line::from("tasks"));
+        bar.push("usage", Line::from("7d 92% left"));
+        bar.push("context", Line::from("12k / 200k"));
+
+        let area = Rect::new(0, 0, 26, 1);
+        let mut buf = Buffer::empty(area);
+        let areas = bar.render(&mut buf, area);
+        let row: String = (0..area.width).map(|x| buf[(x, 0)].symbol()).collect();
+
+        assert_eq!(row.trim(), format!("7d 92% left {SEPARATOR} 12k / 200k"));
+        assert!(!areas.contains_key("tasks"));
+        assert!(areas.contains_key("usage"));
+        assert!(areas.contains_key("context"));
     }
 }
