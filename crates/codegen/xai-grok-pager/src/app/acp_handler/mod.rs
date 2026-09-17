@@ -227,6 +227,11 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                             "load-race: session/update DROPPED by dedup highwater (event_seq <= last_applied)"
                         );
                         false
+                    } else if let acp::SessionUpdate::UsageUpdate(ref usage) = notif.request.update
+                    {
+                        agent.apply_context_used(usage.used, usage.size);
+                        advance_reconnect_cursor(agent, &mut meta);
+                        is_active
                     } else if let acp::SessionUpdate::Plan(plan) = notif.request.update {
                         let items: Vec<_> = plan
                             .entries
@@ -424,11 +429,13 @@ pub(crate) fn handle(msg: AcpClientMessage, app: &mut AppView) -> bool {
                         if let Some(ts) = meta.turn_start_ms {
                             child_view.turn_start_ms = Some(ts);
                         }
-                        child_view.session.handle_update(
-                            notif.request.update,
-                            &meta,
-                            &mut child_view.scrollback,
-                        );
+                        let update = notif.request.update;
+                        if let acp::SessionUpdate::UsageUpdate(usage) = &update {
+                            child_view.apply_context_used(usage.used, usage.size);
+                        }
+                        child_view
+                            .session
+                            .handle_update(update, &meta, &mut child_view.scrollback);
                         for entry_id in child_view.session.tracker.take_pending_edit_hl() {
                             child_view.submit_edit_highlight(entry_id);
                         }

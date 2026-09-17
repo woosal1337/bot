@@ -20,6 +20,31 @@
     }
 
     #[test]
+    fn handle_applies_standard_acp_usage_updates() {
+        let mut app = make_app_with_agent("sess-usage");
+        let (tx, _rx) = tokio::sync::oneshot::channel();
+        let request = acp::SessionNotification::new(
+            acp::SessionId::new("sess-usage"),
+            acp::SessionUpdate::UsageUpdate(acp::UsageUpdate::new(16_384, 200_000)),
+        );
+
+        assert!(handle(
+            AcpClientMessage::SessionNotification(xai_acp_lib::AcpArgs {
+                request,
+                response_tx: tx,
+            }),
+            &mut app,
+        ));
+
+        let context = app.agents[&AgentId(0)]
+            .context_state
+            .as_ref()
+            .expect("context state");
+        assert_eq!(context.used, 16_384);
+        assert_eq!(context.total, 200_000);
+    }
+
+    #[test]
     fn handle_routes_tokens_to_root_when_session_id_not_yet_set() {
         // Regression: a notification racing ahead of TaskResult::SessionCreated (session_id still None) must update the active agent,
         // not be dropped into the empty subagent_views path
@@ -1089,4 +1114,3 @@
         );
         assert_eq!(app.agents[&id].last_applied_event_seq, Some(8));
     }
-
