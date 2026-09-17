@@ -49,6 +49,8 @@ jobs:
         run: sh scripts/tests/install.sh
       - name: Run Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+      - name: Test the release version
+        run: cargo test --locked -p xai-grok-pager-bin --test release_version --all-features
 
   workspace-test:
     name: Bot integration tests
