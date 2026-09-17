@@ -7,6 +7,7 @@ mod event;
 mod id;
 mod profile;
 mod session;
+mod usage;
 
 pub use action::Action;
 pub use event::{
@@ -19,3 +20,4 @@ pub use profile::{
     ProviderId,
 };
 pub use session::{SessionState, SessionStatus};
+pub use usage::{ProviderUsage, UsageLimit, UsageLimitWindow};

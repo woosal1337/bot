@@ -2,8 +2,10 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 use crate::AccountProfileId;
+use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProviderId {
     Codex,
     Grok,
