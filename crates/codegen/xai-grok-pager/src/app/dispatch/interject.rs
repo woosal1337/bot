@@ -2,7 +2,7 @@
 //! Mid-turn interjection dispatch: optimistic local echo, the `x.ai/interject` effect, and prompt-history recording.
 
 use super::ctx::NO_SESSION_NOTICE;
-use crate::app::actions::Effect;
+use crate::app::actions::{Effect, InterjectKind};
 use crate::app::agent::AgentId;
 use crate::app::app_view::{ActiveView, AppView};
 use crate::scrollback::block::RenderBlock;
@@ -29,6 +29,16 @@ pub(super) fn dispatch_interject_on(
     text: String,
     images: Vec<crate::prompt_images::PastedImage>,
 ) -> Vec<Effect> {
+    dispatch_interject_on_with_kind(app, id, text, images, InterjectKind::Interject)
+}
+
+fn dispatch_interject_on_with_kind(
+    app: &mut AppView,
+    id: AgentId,
+    text: String,
+    images: Vec<crate::prompt_images::PastedImage>,
+    kind: InterjectKind,
+) -> Vec<Effect> {
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -54,7 +64,10 @@ pub(super) fn dispatch_interject_on(
 
     // The composer is NOT touched here: the producer that consumed composer text (the InterjectPrompt registry arm) clears it at the call site
     // Every other producer (Send now, edit-interject, plan review comments) carries non-composer text and must keep the user's draft/stash
-    agent.show_toast("Interjection sent");
+    agent.show_toast(match kind {
+        InterjectKind::Interject => "Interjection sent",
+        InterjectKind::SendNow => "Sent now",
+    });
 
     // Image-bearing interjection: build text and image content blocks via the same helper as the queued-prompt drain path
     // The helper covers orphan-placeholder recovery, the allowlist, and the size cap. Text-only stays on the legacy wire.
@@ -72,6 +85,7 @@ pub(super) fn dispatch_interject_on(
         agent_id: id,
         session_id,
         text,
+        kind,
         interjection_id,
         blocks,
     }]
@@ -87,6 +101,9 @@ pub(super) fn dispatch_send_prompt_now(
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
+    if crate::provider::active_provider() == crate::provider::ProviderId::Codex {
+        return dispatch_codex_send_now(app, id, text, images);
+    }
     let reconnect_pending = app.reconnect_pending;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
@@ -151,10 +168,39 @@ pub(super) fn dispatch_send_prompt_now(
     }]
 }
 
+fn dispatch_codex_send_now(
+    app: &mut AppView,
+    id: AgentId,
+    text: String,
+    images: Vec<crate::prompt_images::PastedImage>,
+) -> Vec<Effect> {
+    if app.reconnect_pending {
+        let Some(agent) = app.agents.get_mut(&id) else {
+            return vec![];
+        };
+        let queue_id = agent.session.next_queue_id;
+        agent.session.next_queue_id += 1;
+        agent
+            .session
+            .pending_prompts
+            .push_front(crate::app::agent::QueuedPrompt {
+                images,
+                ..crate::app::agent::QueuedPrompt::plain(
+                    queue_id,
+                    &text,
+                    crate::app::agent::QueueEntryKind::Prompt,
+                )
+            });
+        agent.show_toast("Reconnecting, please wait...");
+        return vec![];
+    }
+    dispatch_interject_on_with_kind(app, id, text, images, InterjectKind::SendNow)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::actions::Action;
+    use crate::app::actions::{Action, TaskResult};
     use crate::app::agent::AgentId;
     use crate::app::dispatch::router::dispatch;
     use crate::app::dispatch::tests::test_app_with_agent;
@@ -326,5 +372,52 @@ mod tests {
             effects.as_slice(),
             [Effect::SendInterject { blocks: None, .. }]
         ));
+    }
+
+    #[test]
+    fn codex_send_now_uses_native_steering() {
+        let mut app = test_app_with_agent();
+        let effects = dispatch_codex_send_now(
+            &mut app,
+            AgentId(0),
+            "steer the active turn".to_owned(),
+            Vec::new(),
+        );
+        assert!(matches!(
+            effects.as_slice(),
+            [Effect::SendInterject {
+                kind: InterjectKind::SendNow,
+                text,
+                ..
+            }] if text == "steer the active turn"
+        ));
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert_eq!(
+            agent.toast.as_ref().map(|(message, _)| message.as_str()),
+            Some("Sent now")
+        );
+    }
+
+    #[test]
+    fn failed_codex_send_now_is_requeued() {
+        let mut app = test_app_with_agent();
+        let effects = dispatch(
+            Action::TaskComplete(TaskResult::InterjectFailed {
+                agent_id: AgentId(0),
+                error: "provider unavailable".to_owned(),
+                text: "keep this message".to_owned(),
+                kind: InterjectKind::SendNow,
+                blocks: None,
+            }),
+            &mut app,
+        );
+        assert!(effects.is_empty());
+        let agent = app.agents.get(&AgentId(0)).unwrap();
+        assert_eq!(agent.session.pending_prompts.len(), 1);
+        assert_eq!(agent.session.pending_prompts[0].text, "keep this message");
+        assert_eq!(
+            agent.toast.as_ref().map(|(message, _)| message.as_str()),
+            Some("Send now failed. Requeued: provider unavailable")
+        );
     }
 }

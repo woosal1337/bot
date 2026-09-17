@@ -12,6 +12,12 @@ use crate::scrollback::entry::EntryId;
 use agent_client_protocol as acp;
 use xai_grok_shell::sampling::types::ReasoningEffort;
 use xai_grok_shell::session::unified_list::SessionKind;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InterjectKind {
+    Interject,
+    SendNow,
+}
 /// Typed error for model switch failures.
 /// Replaces the raw `String` in `TaskResult::SwitchModelComplete` so dispatch can match on the variant instead of parsing strings.
 #[derive(Debug, Clone)]
@@ -1825,6 +1831,7 @@ pub enum Effect {
         agent_id: AgentId,
         session_id: acp::SessionId,
         text: String,
+        kind: InterjectKind,
         /// Client-minted id echoed back on the `x.ai/session/interjection` broadcast so the originator can dedup its optimistic local block.
         interjection_id: String,
         /// Structured text and image content blocks.
@@ -2659,6 +2666,7 @@ pub enum TaskResult {
         agent_id: AgentId,
         error: String,
         text: String,
+        kind: InterjectKind,
         blocks: Option<Vec<agent_client_protocol::ContentBlock>>,
     },
     /// Available commands refreshed from the shell.

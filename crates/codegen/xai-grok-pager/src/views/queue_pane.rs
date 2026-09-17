@@ -982,7 +982,7 @@ impl QueuePane {
                         .bind(Rect::new(cancel_x, screen_y, cancel_w, 1), entry.id);
                 }
 
-                let interject_label = "[Send now]";
+                let interject_label = "[send now]";
                 let interject_w = interject_label.len() as u16;
                 let show_send_now = can_send_now && entry.capabilities.can_send_now();
 
@@ -1663,7 +1663,7 @@ mod tests {
         assert_eq!(
             interject.x + interject.width,
             edit.x,
-            "[Send now] must sit flush against [edit] (no gap to leak through)"
+            "[send now] must sit flush against [edit] (no gap to leak through)"
         );
         assert_eq!(
             edit.x + edit.width,
@@ -1729,12 +1729,12 @@ mod tests {
             );
         };
 
-        render(&mut pane, "[Send now][edit][cancel]".len() as u16 - 1);
-        assert!(pane.send_now.rect.is_some(), "[Send now] survives");
+        render(&mut pane, "[send now][edit][cancel]".len() as u16 - 1);
+        assert!(pane.send_now.rect.is_some(), "[send now] survives");
         assert!(pane.edit_button.rect.is_none(), "[edit] is dropped first");
 
-        render(&mut pane, "[Send now][cancel]".len() as u16 - 1);
-        assert!(pane.send_now.rect.is_none(), "[Send now] can't fit");
+        render(&mut pane, "[send now][cancel]".len() as u16 - 1);
+        assert!(pane.send_now.rect.is_none(), "[send now] can't fit");
         assert!(pane.edit_button.rect.is_some(), "[edit] takes the space");
     }
 

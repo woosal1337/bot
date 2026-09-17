@@ -1539,6 +1539,7 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             agent_id,
             error,
             text,
+            kind,
             blocks,
         } => {
             if let Some(agent) = app.agents.get_mut(&agent_id) {
@@ -1558,7 +1559,11 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
                         skill_token_ranges: Vec::new(),
                         combined_texts: Vec::new(),
                     });
-                agent.show_toast(&format!("Interjection failed. Requeued: {error}"));
+                let action = match kind {
+                    crate::app::actions::InterjectKind::Interject => "Interjection",
+                    crate::app::actions::InterjectKind::SendNow => "Send now",
+                };
+                agent.show_toast(&format!("{action} failed. Requeued: {error}"));
             }
             vec![]
         }

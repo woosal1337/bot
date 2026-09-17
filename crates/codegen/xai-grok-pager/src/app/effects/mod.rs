@@ -3627,6 +3627,7 @@ pub(crate) fn execute(
             agent_id,
             session_id,
             text,
+            kind,
             interjection_id,
             blocks,
         } => {
@@ -3658,6 +3659,7 @@ pub(crate) fn execute(
                                     &format!("couldn't send interjection: {e}"),
                                 ),
                                 text,
+                                kind,
                                 blocks,
                             }
                         }
