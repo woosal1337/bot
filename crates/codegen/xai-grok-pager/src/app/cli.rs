@@ -90,6 +90,12 @@ See ~/.grok/README.md for more information.
         #[arg(long)]
         json: bool,
     },
+    /// Check for or install the latest stable Bot release
+    Update {
+        /// Check for an update without installing it.
+        #[arg(long)]
+        check: bool,
+    },
     /// Generate shell completion scripts (bash, zsh, fish, powershell, ...)
     Completions {
         /// Target shell

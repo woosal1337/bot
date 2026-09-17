@@ -69,6 +69,7 @@ fn process_identity(command: Option<&Command>, is_interactive: bool) -> Option<P
             | Command::Export(_)
             | Command::Trace(_)
             | Command::Version { .. }
+            | Command::Update { .. }
             | Command::Completions { .. }
             | Command::Worktree(_)
             | Command::DiskUsage(_)
@@ -107,6 +108,7 @@ fn command_needs_pre_sandbox_policy_heal(command: Option<&Command>) -> bool {
             | Command::Export(_)
             | Command::Trace(_)
             | Command::Version { .. }
+            | Command::Update { .. }
             | Command::Completions { .. }
             | Command::DiskUsage(_)
             | Command::Workspace(_),
@@ -1990,6 +1992,7 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
             !matches!(
                 command,
                 Command::Version { .. }
+                    | Command::Update { .. }
                     | Command::Doctor(_)
                     | Command::Completions { .. }
                     | Command::Wrap(_)
@@ -2073,6 +2076,21 @@ async fn async_main(mut args: PagerArgs) -> Result<()> {
                 } else {
                     write_version(&mut std::io::stdout().lock())?;
                 }
+                return Ok(());
+            }
+            Command::Update { check } => {
+                if !check && !cfg!(feature = "release-dist") {
+                    anyhow::bail!(
+                        "Self-update is available only in release installations. Build from source again to update this copy."
+                    );
+                }
+                let mode = if check {
+                    bot_update::UpdateMode::Check
+                } else {
+                    bot_update::UpdateMode::Install
+                };
+                let outcome = bot_update::execute(env!("VERSION_WITH_COMMIT"), mode).await?;
+                println!("{}", outcome.message());
                 return Ok(());
             }
             Command::Agent(agent_args) => {
@@ -2442,18 +2460,28 @@ mod tests {
         ));
     }
     #[test]
-    fn retired_updater_cli_is_rejected() {
+    fn updater_cli_is_provider_neutral() {
         use clap::CommandFactory as _;
 
         let command = PagerArgs::command();
         assert!(
             command
                 .get_subcommands()
-                .all(|item| item.get_name() != "update")
+                .any(|item| item.get_name() == "update")
         );
+        let update = PagerArgs::try_parse_from(["bot", "update"]).unwrap();
+        assert!(matches!(
+            update.command,
+            Some(Command::Update { check: false })
+        ));
+        let check = PagerArgs::try_parse_from(["bot", "update", "--check"]).unwrap();
+        assert!(matches!(
+            check.command,
+            Some(Command::Update { check: true })
+        ));
         for args in [
-            vec!["grok", "--no-auto-update"],
-            vec!["grok", "--installer", "npm"],
+            vec!["bot", "--no-auto-update"],
+            vec!["bot", "--installer", "npm"],
         ] {
             assert!(PagerArgs::try_parse_from(&args).is_err(), "{args:?}");
         }

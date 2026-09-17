@@ -67,12 +67,24 @@ jobs:
         env:
           TARGET: ${{ matrix.target }}
         run: "target/${TARGET}/release-dist/bot --version"
+      - name: Check updates on Unix
+        if: matrix.archive == 'tar'
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: "target/${TARGET}/release-dist/bot update --check"
       - name: Check Bot on Windows
         if: matrix.archive == 'zip'
         shell: pwsh
         env:
           TARGET: ${{ matrix.target }}
         run: '& "target/$env:TARGET/release-dist/bot.exe" --version'
+      - name: Check updates on Windows
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        env:
+          TARGET: ${{ matrix.target }}
+        run: '& "target/$env:TARGET/release-dist/bot.exe" update --check'
       - name: Package Bot
         if: matrix.archive == 'tar'
         shell: bash
