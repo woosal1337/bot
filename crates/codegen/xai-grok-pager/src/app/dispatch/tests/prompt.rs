@@ -1968,6 +1968,12 @@ fn prompt_response_routes_idle_title_through_frame_pipeline() {
         app.deferred_notification.is_some(),
         "turn-complete notification must be deferred",
     );
+    assert!(
+        app.deferred_notification
+            .as_ref()
+            .is_some_and(|(notification, _)| notification.body.starts_with("Task finished in ")),
+        "completion notification must use the task-finished label",
+    );
     assert_eq!(
         app.deferred_notification.as_ref().unwrap().1,
         3,
