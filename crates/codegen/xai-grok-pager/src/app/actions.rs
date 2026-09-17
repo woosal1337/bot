@@ -1510,6 +1510,10 @@ pub enum Effect {
         model: String,
         effort: Option<String>,
     },
+    PersistProviderDefaultModel {
+        provider: String,
+        model: Option<String>,
+    },
     /// Toggle mouse reporting off and on to unwedge xterm.js's button tracker
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
     /// writer; `process_effects` re-checks capture so a toggle-off in the same batch wins.
@@ -2750,6 +2754,13 @@ pub enum TaskResult {
         effort: Option<String>,
     },
     ModelEffortDefaultPersistFailed {
+        error: String,
+    },
+    ProviderDefaultModelPersisted {
+        provider: String,
+        model: Option<String>,
+    },
+    ProviderDefaultModelPersistFailed {
         error: String,
     },
     /// Setting persist failed.

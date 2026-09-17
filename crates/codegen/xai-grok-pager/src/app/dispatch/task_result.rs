@@ -1702,6 +1702,19 @@ pub(super) fn dispatch_task_result(result: TaskResult, app: &mut AppView) -> Vec
             app.show_toast(&format!("Could not save default effort: {scrubbed}"));
             vec![]
         }
+        TaskResult::ProviderDefaultModelPersisted { provider, model } => {
+            app.current_ui
+                .set_provider_model_default(&provider, model.clone());
+            super::settings::ui::refresh_open_settings_modals(app);
+            let display = model.as_deref().unwrap_or("Provider default");
+            app.show_toast(&format!("Default model: {display}"));
+            vec![]
+        }
+        TaskResult::ProviderDefaultModelPersistFailed { error } => {
+            let scrubbed = scrub_error_for_toast(&error);
+            app.show_toast(&format!("Could not save default model: {scrubbed}"));
+            vec![]
+        }
         TaskResult::SettingPersistFailed {
             key,
             rollback_value,

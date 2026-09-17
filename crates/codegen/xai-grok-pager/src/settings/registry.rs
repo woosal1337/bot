@@ -603,7 +603,19 @@ pub fn current_value_for(
         // default_model: reads from the pager snapshot (not UiConfig)
         // None (no catalog yet) renders as the empty string
         "default_model" => Some(SettingValue::String(
-            pager.current_model_name.clone().unwrap_or_default(),
+            if pager.active_provider_key == "grok" {
+                pager.current_model_name.clone().unwrap_or_default()
+            } else {
+                ui.provider_model_default(&pager.active_provider_key)
+                    .and_then(|preferred| {
+                        pager
+                            .available_models
+                            .iter()
+                            .find(|(_, id)| id.0.as_ref() == preferred)
+                            .map(|(name, _)| name.clone())
+                    })
+                    .unwrap_or_default()
+            },
         )),
         "default_effort" => Some(SettingValue::String(
             pager
@@ -832,6 +844,27 @@ mod tests {
                 }
             ),
             Some(SettingValue::String(String::new()))
+        );
+    }
+
+    #[test]
+    fn codex_default_model_row_reads_only_the_saved_codex_choice() {
+        let mut ui = UiConfig::default();
+        ui.set_provider_model_default("grok", Some("gpt-5.6-sol".into()));
+        let pager = PagerLocalSnapshot {
+            active_provider_key: "codex".into(),
+            current_model_name: Some("GPT-5".into()),
+            available_models: vec![("GPT-5.6-Sol".into(), acp::ModelId::new("gpt-5.6-sol"))],
+            ..Default::default()
+        };
+        assert_eq!(
+            current_value_for("default_model", &ui, &pager),
+            Some(SettingValue::String(String::new()))
+        );
+        ui.set_provider_model_default("codex", Some("gpt-5.6-sol".into()));
+        assert_eq!(
+            current_value_for("default_model", &ui, &pager),
+            Some(SettingValue::String("GPT-5.6-Sol".into()))
         );
     }
 

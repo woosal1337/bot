@@ -696,7 +696,7 @@ pub fn default_settings_for(provider: &crate::provider::ProviderId) -> Vec<Setti
             category: SettingCategory::Models,
             owner: SettingOwner::Shell,
             label: "Default model",
-            description: "Model used for new sessions. Changing this also switches the active session. Pick `(no override)` to clear.",
+            description: "Model used for new sessions. Changing this also switches the active session. Pick `(no override)` to use the provider default.",
             keywords: &["model", "default", "agent", "llm", "switch"],
             kind: SettingKind::DynamicEnum {
                 default: "",

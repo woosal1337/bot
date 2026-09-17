@@ -1,4 +1,4 @@
-// Modified by the Bot project on 2026-09-16: add model-specific provider effort defaults.
+// Modified by the Bot project on 2026-09-16: add provider-specific model and effort defaults.
 use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
@@ -17,6 +17,8 @@ pub struct UiConfig {
     pub fork_secondary_model: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub model_effort_defaults: BTreeMap<String, BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub provider_model_defaults: BTreeMap<String, String>,
     /// Read by `util::config`, declared here for `serde_ignored`.
     #[serde(default)]
     pub yolo: bool,
@@ -240,6 +242,7 @@ impl Default for UiConfig {
             theme: None,
             fork_secondary_model: xai_grok_models::default_model().to_string(),
             model_effort_defaults: BTreeMap::new(),
+            provider_model_defaults: BTreeMap::new(),
             yolo: false,
             ui_theme: None,
             compact_mode: false,
@@ -282,6 +285,21 @@ impl Default for UiConfig {
 }
 
 impl UiConfig {
+    pub fn provider_model_default(&self, provider: &str) -> Option<&str> {
+        self.provider_model_defaults
+            .get(provider)
+            .map(String::as_str)
+    }
+
+    pub fn set_provider_model_default(&mut self, provider: &str, model: Option<String>) {
+        if let Some(model) = model {
+            self.provider_model_defaults
+                .insert(provider.to_owned(), model);
+        } else {
+            self.provider_model_defaults.remove(provider);
+        }
+    }
+
     pub fn model_effort_default(&self, provider: &str, model: &str) -> Option<&str> {
         self.model_effort_defaults
             .get(provider)?
@@ -449,6 +467,29 @@ mod tests {
         assert_eq!(
             restored.model_effort_default("grok", "gpt-5.6-sol"),
             Some("low")
+        );
+    }
+
+    #[test]
+    fn provider_model_defaults_are_isolated() {
+        let mut ui = UiConfig::default();
+        ui.set_provider_model_default("codex", Some("gpt-5.6-sol".into()));
+        ui.set_provider_model_default("gemini", Some("gemini-pro".into()));
+        let saved = serde_json::to_string(&ui).expect("write preferences");
+        let mut restored: UiConfig = serde_json::from_str(&saved).expect("read preferences");
+        assert_eq!(
+            restored.provider_model_default("codex"),
+            Some("gpt-5.6-sol")
+        );
+        assert_eq!(
+            restored.provider_model_default("gemini"),
+            Some("gemini-pro")
+        );
+        restored.set_provider_model_default("codex", None);
+        assert_eq!(restored.provider_model_default("codex"), None);
+        assert_eq!(
+            restored.provider_model_default("gemini"),
+            Some("gemini-pro")
         );
     }
 

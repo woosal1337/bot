@@ -1533,7 +1533,16 @@ pub(in crate::app::dispatch) fn set_default_model(
     }
 
     // Idempotent: the same model already active is a no-op
+    let provider = crate::provider::active_provider();
     if prev_id.as_ref() == Some(&new_id) {
+        if provider != crate::provider::ProviderId::Grok
+            && app.current_ui.provider_model_default(provider.key()) != Some(new_id.0.as_ref())
+        {
+            return vec![Effect::PersistProviderDefaultModel {
+                provider: provider.key().to_string(),
+                model: Some(new_id.0.to_string()),
+            }];
+        }
         return vec![];
     }
 
@@ -1548,13 +1557,20 @@ pub(in crate::app::dispatch) fn set_default_model(
         prev_id = ?prev_id.as_ref().map(|id| id.0.as_ref()),
         "setting changed",
     );
-    app.show_toast(&save_default_model_toast(&new_display));
+    if provider == crate::provider::ProviderId::Grok {
+        app.show_toast(&save_default_model_toast(&new_display));
+    }
 
     // Persist the **model ID** (catalog key), not the display name.
     // would silently fail to resolve on the next startup.
     // slugs that must not become the global Build `default_model`.
     let mut effects: Vec<Effect> = Vec::new();
-    if !xai_grok_shell::agent::chat_modes::process_chat_mode_enabled() {
+    if provider != crate::provider::ProviderId::Grok {
+        effects.push(Effect::PersistProviderDefaultModel {
+            provider: provider.key().to_string(),
+            model: Some(new_id.0.to_string()),
+        });
+    } else if !xai_grok_shell::agent::chat_modes::process_chat_mode_enabled() {
         let new_id_str = new_id.0.to_string();
         let prev_id_str = prev_id
             .as_ref()
@@ -1632,6 +1648,20 @@ pub(in crate::app::dispatch) fn set_default_effort(
 /// Clear the default model override.
 /// Persists `[models].default = None`; does NOT mutate the active session's current model.
 pub(in crate::app::dispatch) fn clear_default_model(app: &mut AppView) -> Vec<Effect> {
+    let provider = crate::provider::active_provider();
+    if provider != crate::provider::ProviderId::Grok {
+        if app
+            .current_ui
+            .provider_model_default(provider.key())
+            .is_none()
+        {
+            return vec![];
+        }
+        return vec![Effect::PersistProviderDefaultModel {
+            provider: provider.key().to_string(),
+            model: None,
+        }];
+    }
     // Active-agent snapshot: the previous model ID for the rollback payload
     // Use the model ID (catalog key), not the display name, so that rollback persists a value `resolve_default_model` can match
     let prev_id_str = if let ActiveView::Agent(aid) = app.active_view

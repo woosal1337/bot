@@ -1113,7 +1113,7 @@ fn every_setting_has_action_for_reset_arm() {
                  no-op. Add an arm to `action_for_reset` in dispatch.rs.",
                 meta.key,
             );
-            if meta.key == "default_model" {
+            if matches!(meta.key, "default_model" | "default_effort") {
                 continue;
             }
             let mut app = test_app_with_agent();
@@ -1504,6 +1504,33 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 agent.session.models.available.insert(id.clone(), info);
                 agent.session.models.set_current(id, None);
             }
+        }
+        "default_effort" => {
+            use agent_client_protocol as acp;
+            let id = acp::ModelId::new("test-effort-model");
+            let info = acp::ModelInfo::new(id.clone(), "Test Effort Model").meta(
+                serde_json::json!({
+                    "supportsReasoningEffort": true,
+                    "reasoningEfforts": [{ "id": "high", "value": "high", "label": "High" }]
+                })
+                .as_object()
+                .cloned(),
+            );
+            if let ActiveView::Agent(aid) = app.active_view
+                && let Some(agent) = app.agents.get_mut(&aid)
+            {
+                agent.session.models.available.insert(id.clone(), info);
+                agent.session.models.current = Some(id);
+            }
+            let _ = dispatch(Action::SetDefaultEffort("high".into()), app);
+            let _ = dispatch(
+                Action::TaskComplete(TaskResult::ModelEffortDefaultPersisted {
+                    provider: "grok".into(),
+                    model: "test-effort-model".into(),
+                    effort: Some("high".into()),
+                }),
+                app,
+            );
         }
         "max_thoughts_width" => {
             let _ = dispatch(Action::SetMaxThoughtsWidth(200), app);

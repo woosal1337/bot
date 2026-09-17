@@ -222,6 +222,27 @@ pub async fn set_model_effort_default(
     .await
 }
 
+pub async fn set_provider_model_default(provider: String, model: Option<String>) -> Result<()> {
+    if provider.is_empty()
+        || provider.len() > 64
+        || !provider
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+    {
+        anyhow::bail!("Invalid provider key for a model preference.");
+    }
+    if model
+        .as_ref()
+        .is_some_and(|value| value.is_empty() || value.len() > MAX_DEFAULT_MODEL_LEN)
+    {
+        anyhow::bail!("Invalid model ID for a model preference.");
+    }
+    update_config(move |cfg| {
+        cfg.ui.set_provider_model_default(&provider, model.clone());
+    })
+    .await
+}
+
 /// Persist `[telemetry].trace_upload`.
 pub async fn set_trace_upload(value: bool) -> Result<()> {
     update_config(|cfg| {
@@ -397,5 +418,18 @@ mod model_effort_default_tests {
             Some("high")
         );
         assert_eq!(restored.model_effort_default("grok", "gpt-5.6-sol"), None);
+    }
+
+    #[test]
+    fn provider_model_defaults_round_trip_through_toml() {
+        let mut ui = UiConfig::default();
+        ui.set_provider_model_default("codex", Some("gpt-5.6-sol".into()));
+        let saved = toml::to_string(&ui).expect("write UI config");
+        let restored: UiConfig = toml::from_str(&saved).expect("read UI config");
+        assert_eq!(
+            restored.provider_model_default("codex"),
+            Some("gpt-5.6-sol")
+        );
+        assert_eq!(restored.provider_model_default("grok"), None);
     }
 }
