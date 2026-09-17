@@ -34,15 +34,26 @@ current user, and adds its directory to the user `PATH`.
 
 ### Update an installed copy
 
-Close Bot, then run the install command for your operating system again. It
-downloads the latest published release, checks its archive hash, and replaces
-the installed binary. Run `bot --version` to check the installed version. See
-the [latest release](https://github.com/woosal1337/bot/releases/latest) to
-check the available version. A commit on `main` does not update an installed
-copy; a new release must publish first. Bot does not yet check for updates in
-the terminal interface.
+Bot 1.0.2 and earlier need one installer update. Close Bot, then run the install
+command for your operating system again. Newer releases include these commands:
 
-The one-line install commands above fetch their scripts from `main`. The
+```sh
+bot update --check
+bot update
+```
+
+Bot installs only the latest stable release. It checks the target, download
+size, GitHub asset digest, `SHA256SUMS`, and staged binary version. The final
+replacement is atomic on macOS and Linux. Windows finishes the replacement
+after the update command exits. Existing sessions keep their current version
+until they restart.
+
+Bot never installs an update during startup. A commit on `main` does not update
+an installed copy. The release workflow must publish a new version first. See
+[`docs/updating.md`](docs/updating.md) for the complete update and recovery
+process.
+
+The one-line install commands fetch their scripts from `main`. The
 release archive is checked, but the script itself is not checked before it
 runs. Each release also includes the installer scripts in `SHA256SUMS`. Download
 the script and the checksum file from the release when you must check both.
