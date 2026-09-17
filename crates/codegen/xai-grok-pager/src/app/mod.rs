@@ -565,6 +565,10 @@ async fn bounded_connect(
 /// Main entry point: connect to agent, init terminal, run event loop, restore.
 /// If a session ID is provided via `--resume` / `--load` / `--continue`, the pager skips the welcome screen and immediately loads that session.
 /// The load replays the session's history; sessions not found locally are restored from remote storage.
+fn provider_permission_mode<'a>(cli: Option<&'a str>, saved: Option<&'a str>) -> &'a str {
+    cli.or(saved).unwrap_or("ask")
+}
+
 pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
     let provider_state = crate::provider::require_ready(&args.provider)?;
     let requested_provider = provider_state.id().clone();
@@ -813,6 +817,12 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
                 .and_then(|s| s.permission_mode.as_deref())
         })
         .flatten();
+    let saved_permission_mode = raw_config
+        .get("ui")
+        .and_then(|ui| ui.get("permission_mode"))
+        .and_then(|value| value.as_str());
+    let provider_permission_mode =
+        provider_permission_mode(args.permission_mode_flag.as_deref(), saved_permission_mode);
     let launch_yolo = if is_grok_provider {
         xai_grok_shell::util::config::effective_yolo_for_launch(
             args.yolo,
@@ -821,7 +831,7 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
         )
     } else {
         xai_grok_shell::util::config::EffectiveYolo {
-            yolo: args.yolo || args.permission_mode_flag.as_deref() == Some("always-approve"),
+            yolo: args.yolo || provider_permission_mode == "always-approve",
             blocked_warning: None,
             policy_block: None,
         }
@@ -834,10 +844,10 @@ pub async fn run(mut args: PagerArgs) -> anyhow::Result<()> {
             xai_grok_shell::util::config::default_interactive_permission_mode(),
         )
     } else {
-        !launch_yolo.yolo && args.permission_mode_flag.as_deref() == Some("auto")
+        !launch_yolo.yolo && provider_permission_mode == "auto"
     };
     let launch_permission_mode = if !is_grok_provider {
-        args.permission_mode_flag.as_deref().unwrap_or("ask")
+        provider_permission_mode
     } else if launch_yolo.yolo {
         "always-approve"
     } else if launch_auto {
@@ -1829,6 +1839,19 @@ fn set_panic_hook() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_permission_mode_prefers_cli_then_saved_setting() {
+        assert_eq!(
+            provider_permission_mode(Some("read-only"), Some("always-approve")),
+            "read-only"
+        );
+        assert_eq!(
+            provider_permission_mode(None, Some("always-approve")),
+            "always-approve"
+        );
+        assert_eq!(provider_permission_mode(None, None), "ask");
+    }
     /// The loop-top gboom keyboard-layer sync runs on the event-loop thread: its push/pop escapes must ride the writer queue.
     /// push/pop escapes must ride the writer queue.
     #[cfg(not(windows))]

@@ -690,6 +690,9 @@ async fn persist_permission_mode_no_session_id_suppresses_acp() {
             "session_id=None must suppress the ACP notification — sessionless \
              agents have no ACP channel to notify",
         );
+    let root = xai_grok_shell::util::config::load_effective_config().expect("load config");
+    let config = xai_grok_shell::util::config::load_config_from_toml(&root);
+    assert_eq!(config.ui.permission_mode.as_deref(), Some("always-approve"));
 }
 /// BestEffort with a disk failure must not return `SettingPersisted`.
 #[tokio::test]

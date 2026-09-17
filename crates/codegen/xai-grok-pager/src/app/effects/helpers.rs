@@ -1097,15 +1097,6 @@ pub(crate) async fn persist_permission_mode_and_notify(
             tracing::warn!("Failed to send yolo_mode_changed notification: {e}");
         }
     }
-    if crate::provider::active_provider() == crate::provider::ProviderId::Codex {
-        if session_id.is_some() {
-            notify(tx, canonical, session_id.as_ref()).await;
-        }
-        return TaskResult::SettingPersisted {
-            key: "permission_mode",
-            value: crate::settings::SettingValue::Enum(config_str),
-        };
-    }
     let notify_first = session_id.is_some()
         && matches!(persist, PermissionModePersist::BestEffort);
     if notify_first {

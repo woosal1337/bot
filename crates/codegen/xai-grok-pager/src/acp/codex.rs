@@ -411,6 +411,14 @@ pub(crate) async fn spawn_codex(
 }
 
 impl CodexAcpAgent {
+    fn preferred_model(&self) -> String {
+        let Ok(root) = xai_grok_shell::util::config::load_effective_config() else {
+            return self.default_model.clone();
+        };
+        let ui = xai_grok_shell::util::config::load_config_from_toml(&root).ui;
+        selected_codex_default_model(&self.models, &ui, &self.default_model)
+    }
+
     async fn start(
         executable: PathBuf,
         client_tx: xai_acp_lib::AcpClientTx,
@@ -2057,7 +2065,7 @@ impl acp::Agent for CodexAcpAgent {
         &self,
         _args: acp::InitializeRequest,
     ) -> Result<acp::InitializeResponse, acp::Error> {
-        let state = self.model_state(&self.default_model, None);
+        let state = self.model_state(&self.preferred_model(), None);
         let mut meta = Map::new();
         meta.insert("grokShell".to_owned(), Value::Bool(false));
         meta.insert(
@@ -2140,7 +2148,7 @@ impl acp::Agent for CodexAcpAgent {
         let started = self
             .client
             .start_thread(&ThreadStartParams {
-                model: Some(self.default_model.clone()),
+                model: Some(self.preferred_model()),
                 cwd: Some(cwd.to_string_lossy().into_owned()),
                 approval_policy: permission_mode.approval_policy(),
                 approvals_reviewer: permission_mode.approvals_reviewer(),
@@ -2679,6 +2687,21 @@ fn codex_display_name(value: &str) -> String {
             .collect::<Vec<_>>()
             .join(" "),
     }
+}
+
+fn selected_codex_default_model(
+    models: &[Model],
+    ui: &xai_grok_shell::agent::config::UiConfig,
+    fallback: &str,
+) -> String {
+    ui.provider_model_default("codex")
+        .and_then(|preferred| {
+            models
+                .iter()
+                .find(|model| model.model == preferred)
+                .map(|model| model.model.clone())
+        })
+        .unwrap_or_else(|| fallback.to_owned())
 }
 
 async fn load_models(client: &CodexClient) -> Result<Vec<Model>> {
@@ -6621,6 +6644,23 @@ mod tests {
             supports_personality: false,
             extra: Default::default(),
         }
+    }
+
+    #[test]
+    fn codex_default_model_follows_only_a_known_codex_preference() {
+        let mut ui = xai_grok_shell::agent::config::UiConfig::default();
+        let mut alternative = model();
+        alternative.model = "gpt-5.6-sol".to_owned();
+        let models = vec![model(), alternative];
+        ui.set_provider_model_default("grok", Some("gpt-5.6-sol".into()));
+        assert_eq!(selected_codex_default_model(&models, &ui, "gpt-5"), "gpt-5");
+        ui.set_provider_model_default("codex", Some("gpt-5.6-sol".into()));
+        assert_eq!(
+            selected_codex_default_model(&models, &ui, "gpt-5"),
+            "gpt-5.6-sol"
+        );
+        ui.set_provider_model_default("codex", Some("removed-model".into()));
+        assert_eq!(selected_codex_default_model(&models, &ui, "gpt-5"), "gpt-5");
     }
 
     #[test]
