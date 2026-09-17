@@ -10,6 +10,7 @@ members = [
     "crates/bot-core",
     "crates/bot-provider",
     "crates/bot-provider-codex",
+    "crates/bot-update",
     "crates/build/xai-proto-build",
     "crates/codegen/ptyctl",
     "crates/codegen/ptyctl-cli",

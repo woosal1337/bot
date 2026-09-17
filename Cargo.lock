@@ -1434,6 +1434,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bot-update"
+version = "1.0.0"
+dependencies = [
+ "flate2",
+ "fs2",
+ "futures-util",
+ "reqwest 0.12.24",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "xai-grok-extra-ca",
+ "zip 3.0.0",
+]
+
+[[package]]
 name = "brotli"
 version = "7.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13683,6 +13702,7 @@ version = "1.0.2"
 dependencies = [
  "anyhow",
  "bot-core",
+ "bot-update",
  "clap",
  "cryptify",
  "dunce",
