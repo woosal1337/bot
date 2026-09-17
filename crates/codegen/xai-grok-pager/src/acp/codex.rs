@@ -2153,6 +2153,7 @@ impl acp::Agent for CodexAcpAgent {
                 mode: CollaborationModeKind::Default,
             },
         );
+        self.refresh_provider_usage(&session_id).await;
         Ok(acp::NewSessionResponse::new(session_id)
             .modes(codex_mode_state(CollaborationModeKind::Default))
             .models(self.model_state(&model, effort.as_deref())))
@@ -2201,6 +2202,7 @@ impl acp::Agent for CodexAcpAgent {
                 mode: CollaborationModeKind::Default,
             },
         );
+        self.refresh_provider_usage(&args.session_id).await;
         for turn in &turns {
             for update in replay_updates(&args.session_id, std::slice::from_ref(turn)) {
                 self.notify(&args.session_id, update).await;

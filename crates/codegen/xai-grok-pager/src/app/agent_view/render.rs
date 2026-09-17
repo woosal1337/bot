@@ -1520,6 +1520,11 @@ impl AgentView {
                 Line::from(Span::styled(label, mode_style)),
             );
         }
+        if let Some(line) = self.provider_usage.as_ref().and_then(|usage| {
+            crate::views::provider_usage::status_line(usage, self.hit_credits.hovered, &theme)
+        }) {
+            status.push("credits", line);
+        }
         let ctx_used = self.context_state.as_ref().map(|c| c.used);
         let model_window = self.session.models.get_context_window();
         let ctx_total = self

@@ -63,6 +63,7 @@ pub(super) fn open_usage_info_modal(
             session_id: session_id.as_ref().map(|s| s.0.to_string()),
         },
     );
+    state.provider_usage = agent.provider_usage.clone();
     state.fetch_nonce = nonce;
 
     let mut effects = Vec::new();
@@ -78,11 +79,14 @@ pub(super) fn open_usage_info_modal(
             show_resolved_model,
             nonce,
         });
-        effects.push(Effect::FetchSessionUsage {
-            agent_id: id,
-            session_id,
-            nonce,
-        });
+        if crate::provider::active_provider() == crate::provider::ProviderId::Grok {
+            state.session_usage_pending = true;
+            effects.push(Effect::FetchSessionUsage {
+                agent_id: id,
+                session_id,
+                nonce,
+            });
+        }
     }
     agent.active_modal = Some(ActiveModal::UsageInfo {
         state: Box::new(state),
@@ -188,6 +192,20 @@ pub(super) fn dispatch_show_usage(app: &mut AppView) -> Vec<Effect> {
         let Some(agent) = app.agents.get_mut(&id) else {
             return vec![];
         };
+        if crate::provider::active_provider() != crate::provider::ProviderId::Grok {
+            let text = agent
+                .provider_usage
+                .as_ref()
+                .map(|usage| {
+                    crate::views::provider_usage::detail_text(
+                        usage,
+                        &crate::theme::Theme::current(),
+                    )
+                })
+                .unwrap_or_else(|| "Usage data is unavailable.".to_owned());
+            push_and_page_flip(&mut agent.scrollback, RenderBlock::system(text));
+            return vec![];
+        }
         agent.session.session_id.clone()
     };
     match session_id {
@@ -227,6 +245,7 @@ pub(super) fn handle_session_usage_result(
             if let Some(state) = usage_modal_state_mut(agent)
                 && state.fetch_nonce == nonce
             {
+                state.session_usage_pending = false;
                 state.session_usage_text = Some(text);
             }
         }

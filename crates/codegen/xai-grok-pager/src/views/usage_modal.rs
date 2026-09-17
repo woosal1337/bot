@@ -79,6 +79,8 @@ pub struct UsageInfoModalState {
     pub session_error: Option<String>,
     /// Pre-formatted session token/cost summary (`session_usage_block_text`).
     pub session_usage_text: Option<String>,
+    pub provider_usage: Option<bot_core::ProviderUsage>,
+    pub session_usage_pending: bool,
     /// Fetch generation stamped at open; results from an earlier open (same session, modal reopened) are dropped instead of overwriting.
     pub fetch_nonce: u64,
     /// Hit rects for copyable value rows, refreshed every render.
@@ -159,6 +161,8 @@ impl UsageInfoModalState {
             context_error: None,
             session_error: None,
             session_usage_text: None,
+            provider_usage: None,
+            session_usage_pending: false,
             fetch_nonce: Default::default(),
             session_fields: None,
             copy_hits: Vec::new(),
@@ -852,6 +856,10 @@ fn context_tab_lines(state: &UsageInfoModalState, theme: &Theme, width: u16) -> 
 
 fn session_usage_lines(state: &UsageInfoModalState, theme: &Theme) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
+    if let Some(usage) = &state.provider_usage {
+        lines.extend(crate::views::provider_usage::detail_lines(usage, theme));
+        lines.push(Line::default());
+    }
     if let Some(usage_text) = &state.session_usage_text {
         for (i, row) in usage_text.lines().enumerate() {
             if i == 0 {
@@ -860,10 +868,12 @@ fn session_usage_lines(state: &UsageInfoModalState, theme: &Theme) -> Vec<Line<'
                 lines.push(plain(theme, row));
             }
         }
-    } else if state.ctx.session_id.is_some() {
+    } else if state.session_usage_pending {
         lines.push(muted_line(theme, "Loading session usage\u{2026}"));
-    } else {
+    } else if lines.is_empty() && state.ctx.session_id.is_none() {
         lines.push(muted_line(theme, "No active session."));
+    } else if lines.is_empty() {
+        lines.push(muted_line(theme, "Usage data is unavailable."));
     }
     lines
 }
@@ -1009,8 +1019,10 @@ mod tests {
     fn session_usage_tab_states() {
         let theme = Theme::current();
         let mut state = state_with_session();
+        state.session_usage_pending = true;
         let lines = session_usage_lines(&state, &theme);
         assert!(lines[0].to_string().contains("Loading session usage"));
+        state.session_usage_pending = false;
         state.session_usage_text = Some("Session usage: 42 input tokens".to_string());
         let lines = session_usage_lines(&state, &theme);
         assert_eq!(lines[0].to_string(), "Session usage: 42 input tokens");

@@ -2337,6 +2337,7 @@ mod settings;
 mod scheduled_tasks;
 mod queue_and_adoption;
 mod plan_mode;
+mod provider_usage;
 mod reconnect;
 mod turn_completion;
 mod hooks;

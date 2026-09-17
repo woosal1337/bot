@@ -39,6 +39,7 @@ mod interactions;
 mod mcp;
 mod permissions;
 mod prompt_origin;
+mod provider_usage;
 mod queue;
 mod routing;
 mod session_notification;
@@ -66,6 +67,7 @@ pub(crate) use prompt_origin::{
     is_scheduler_fired_prompt, is_server_initiated_prompt, is_wake_prompt,
     should_adopt_running_prompt,
 };
+use provider_usage::handle_provider_usage;
 
 pub(crate) use subagent_activity::finalize_killed_subagent;
 use subagent_activity::{subagent_activity_label, sync_subagent_activity};
@@ -621,6 +623,7 @@ fn handle_ext_notification(notif: &acp::ExtNotification, app: &mut AppView) -> b
         }
         "x.ai/mcp/elicit_complete" => handle_mcp_elicit_complete(notif, app),
         "x.ai/mcp/servers_updated" => handle_mcp_servers_updated(notif, app),
+        bot_core::PROVIDER_USAGE_UPDATED_METHOD => handle_provider_usage(notif, app),
         _ => false,
     }
 }
