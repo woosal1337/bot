@@ -20,4 +20,6 @@ pub use profile::{
     ProviderId,
 };
 pub use session::{SessionState, SessionStatus};
-pub use usage::{ProviderUsage, UsageLimit, UsageLimitWindow};
+pub use usage::{
+    PROVIDER_USAGE_UPDATED_METHOD, ProviderUsage, ProviderUsageUpdate, UsageLimit, UsageLimitWindow,
+};

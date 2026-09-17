@@ -8,10 +8,14 @@ use agent_client_protocol as acp;
 use agent_client_protocol::Client as _;
 use anyhow::{Context, Result};
 use base64::Engine as _;
-use bot_core::{AgentEvent, ToolCallKind, ToolCallState, TurnOutcome};
+use bot_core::{
+    AgentEvent, PROVIDER_USAGE_UPDATED_METHOD, ProviderId as CoreProviderId, ProviderUsage,
+    ProviderUsageUpdate, ToolCallKind, ToolCallState, TurnOutcome, UsageLimit, UsageLimitWindow,
+};
 use bot_provider::{CommandKind, CommandOwnership};
 use bot_provider_codex::{
-    ACCOUNT_LOGIN_COMPLETED_NOTIFICATION, AccountLoginCompletedNotification, AccountReadResponse,
+    ACCOUNT_LOGIN_COMPLETED_NOTIFICATION, ACCOUNT_RATE_LIMITS_UPDATED_NOTIFICATION,
+    AccountLoginCompletedNotification, AccountRateLimitsResponse, AccountReadResponse,
     CancelLoginAccountParams, CodexClient, CodexEvent, CodexEventNormalizer, CollaborationMode,
     CollaborationModeKind, CollaborationModeSettings, CommandExecutionApprovalDecision,
     CommandExecutionRequestApprovalResponse, ConfigValueWriteParams,
@@ -328,6 +332,7 @@ struct CodexAcpAgent {
     pending_elicitations: RefCell<HashMap<(String, String), String>>,
     pending_login: RefCell<Option<CodexPendingLogin>>,
     default_permission_mode: RefCell<CodexPermissionMode>,
+    provider_usage: RefCell<ProviderUsage>,
 }
 
 pub(crate) async fn spawn_codex(
@@ -437,6 +442,11 @@ impl CodexAcpAgent {
             pending_elicitations: RefCell::new(HashMap::new()),
             pending_login: RefCell::new(None),
             default_permission_mode: RefCell::new(permission_mode),
+            provider_usage: RefCell::new(ProviderUsage {
+                provider: CoreProviderId::Codex,
+                lifetime_tokens: None,
+                limits: Vec::new(),
+            }),
         })
     }
 
@@ -656,6 +666,45 @@ impl CodexAcpAgent {
             .await;
     }
 
+    async fn notify_provider_usage(&self, session_id: &acp::SessionId) {
+        let update = ProviderUsageUpdate {
+            session_id: session_id.0.to_string(),
+            usage: self.provider_usage.borrow().clone(),
+        };
+        let Ok(raw) = serde_json::value::to_raw_value(&update) else {
+            return;
+        };
+        let _ = self
+            .gateway
+            .ext_notification(acp::ExtNotification::new(
+                PROVIDER_USAGE_UPDATED_METHOD,
+                raw.into(),
+            ))
+            .await;
+    }
+
+    async fn refresh_provider_usage(&self, session_id: &acp::SessionId) {
+        let (rate_limits, account_usage) = tokio::join!(
+            self.client.account_rate_limits(),
+            self.client.account_usage()
+        );
+        {
+            let mut usage = self.provider_usage.borrow_mut();
+            match rate_limits {
+                Ok(response) => usage.limits = map_usage_limits(response),
+                Err(error) => tracing::debug!(error = %error, "Codex rate-limit refresh failed"),
+            }
+            match account_usage {
+                Ok(response) => {
+                    usage.lifetime_tokens =
+                        response.summary.and_then(|summary| summary.lifetime_tokens);
+                }
+                Err(error) => tracing::debug!(error = %error, "Codex account-usage refresh failed"),
+            }
+        }
+        self.notify_provider_usage(session_id).await;
+    }
+
     async fn stream_turn(
         &self,
         session_id: &acp::SessionId,
@@ -699,6 +748,22 @@ impl CodexAcpAgent {
             }
             if let CodexEvent::Notification(notification) = &event {
                 self.complete_mcp_oauth(session_id, notification).await?;
+            }
+            if let CodexEvent::Notification(notification) = &event
+                && notification.method == ACCOUNT_RATE_LIMITS_UPDATED_NOTIFICATION
+            {
+                match serde_json::from_value::<AccountRateLimitsResponse>(
+                    notification.params.clone(),
+                ) {
+                    Ok(response) => {
+                        self.provider_usage.borrow_mut().limits = map_usage_limits(response);
+                        self.notify_provider_usage(session_id).await;
+                    }
+                    Err(error) => {
+                        tracing::debug!(error = %error, "Codex sent invalid rate-limit data");
+                    }
+                }
+                continue;
             }
             if let CodexEvent::Notification(notification) = &event {
                 if notification.method == "turn/diff/updated" {
@@ -2208,6 +2273,7 @@ impl acp::Agent for CodexAcpAgent {
             }
         };
         let turn_id = turn.turn.id;
+        self.refresh_provider_usage(&args.session_id).await;
         let pending_cancel =
             if let Some(session) = self.sessions.borrow_mut().get_mut(&args.session_id) {
                 let previous = std::mem::replace(
@@ -2537,6 +2603,41 @@ fn map_rate_limit_window(window: bot_provider_codex::RateLimitWindow) -> Provide
     ProviderRateLimitWindow {
         used_percent: window.used_percent,
         window_minutes: window.window_duration_mins,
+        resets_at: window.resets_at,
+    }
+}
+
+fn map_usage_limits(response: AccountRateLimitsResponse) -> Vec<UsageLimit> {
+    let snapshots = match response.rate_limits_by_limit_id {
+        Some(items) if !items.is_empty() => items.into_values().collect(),
+        _ => vec![response.rate_limits],
+    };
+    snapshots.into_iter().map(map_usage_limit).collect()
+}
+
+fn map_usage_limit(snapshot: bot_provider_codex::RateLimitSnapshot) -> UsageLimit {
+    let mut windows = Vec::with_capacity(2);
+    if let Some(window) = snapshot.primary {
+        windows.push(map_usage_window("Primary", window));
+    }
+    if let Some(window) = snapshot.secondary {
+        windows.push(map_usage_window("Secondary", window));
+    }
+    UsageLimit {
+        id: snapshot.limit_id,
+        name: snapshot.limit_name.unwrap_or_else(|| "Codex".to_owned()),
+        model: snapshot.normal_model_slug,
+        windows,
+    }
+}
+
+fn map_usage_window(label: &str, window: bot_provider_codex::RateLimitWindow) -> UsageLimitWindow {
+    UsageLimitWindow {
+        label: label.to_owned(),
+        used_percent: f64::from(window.used_percent),
+        duration_minutes: window
+            .window_duration_mins
+            .and_then(|minutes| u64::try_from(minutes).ok()),
         resets_at: window.resets_at,
     }
 }
@@ -4220,6 +4321,96 @@ mod tests {
         let local = codex_interactive_auth_methods(true);
         assert_eq!(local[0].id().0.as_ref(), CODEX_CHATGPT_AUTH_METHOD);
         assert_eq!(local[1].id().0.as_ref(), CODEX_DEVICE_AUTH_METHOD);
+    }
+
+    #[test]
+    fn maps_codex_account_windows_to_provider_usage() {
+        let response: AccountRateLimitsResponse = serde_json::from_value(json!({
+            "rateLimits": {
+                "limitId": "codex",
+                "limitName": "Codex",
+                "normalModelSlug": "gpt-5.6-sol",
+                "primary": {
+                    "usedPercent": 37,
+                    "windowDurationMins": 300,
+                    "resetsAt": 1_789_238_400
+                },
+                "secondary": {
+                    "usedPercent": 8,
+                    "windowDurationMins": 10_080,
+                    "resetsAt": 1_789_843_200
+                }
+            }
+        }))
+        .expect("rate limits");
+
+        let usage = ProviderUsage {
+            provider: CoreProviderId::Codex,
+            lifetime_tokens: Some(1_234_567),
+            limits: map_usage_limits(response),
+        };
+        let (limit, window) = usage.longest_window().expect("quota window");
+        assert_eq!(limit.name, "Codex");
+        assert_eq!(limit.model.as_deref(), Some("gpt-5.6-sol"));
+        assert_eq!(window.label, "Secondary");
+        assert_eq!(window.used_percent, 8.0);
+        assert_eq!(window.duration_minutes, Some(10_080));
+        assert_eq!(window.remaining_percent(), 92.0);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn publishes_codex_provider_usage_during_a_turn() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let directory = tempfile::tempdir().unwrap();
+                let (mut channel, agent_channel) = acp_channels();
+                let (usage_tx, mut usage_rx) = tokio::sync::mpsc::unbounded_channel();
+                let receiver = tokio::task::spawn_local(async move {
+                    while let Some(message) = channel.rx.recv().await {
+                        match message.boxed() {
+                            xai_acp_lib::AcpClientMessageBox::SessionNotification(args) => {
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            xai_acp_lib::AcpClientMessageBox::ExtNotification(args) => {
+                                if args.request.method.as_ref() == PROVIDER_USAGE_UPDATED_METHOD {
+                                    let update: ProviderUsageUpdate =
+                                        serde_json::from_str(args.request.params.get()).unwrap();
+                                    let _ = usage_tx.send(update);
+                                }
+                                let _ = args.response_tx.send(Ok(()));
+                            }
+                            _ => panic!("unexpected client request"),
+                        }
+                    }
+                });
+                let agent = CodexAcpAgent::start(
+                    codex_fixture(),
+                    agent_channel.tx,
+                    CodexPermissionMode::Default,
+                )
+                .await
+                .unwrap();
+                let session_id = agent
+                    .new_session(acp::NewSessionRequest::new(directory.path().to_path_buf()))
+                    .await
+                    .unwrap()
+                    .session_id;
+
+                let response = prompt_fixture(&agent, &session_id, "USAGE").await;
+                assert_eq!(response.stop_reason, acp::StopReason::EndTurn);
+                let update = usage_rx.recv().await.expect("provider usage update");
+                assert_eq!(update.session_id, session_id.0.as_ref());
+                assert_eq!(update.usage.provider, CoreProviderId::Codex);
+                assert_eq!(update.usage.lifetime_tokens, Some(1_234_567));
+                let (_, window) = update.usage.longest_window().expect("quota window");
+                assert_eq!(window.duration_minutes, Some(10_080));
+                assert_eq!(window.remaining_percent(), 92.0);
+
+                agent.client.close().await.unwrap();
+                receiver.abort();
+            })
+            .await;
     }
 
     #[cfg(unix)]

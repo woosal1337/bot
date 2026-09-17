@@ -2,6 +2,15 @@ use serde::{Deserialize, Serialize};
 
 use crate::ProviderId;
 
+pub const PROVIDER_USAGE_UPDATED_METHOD: &str = "bot/usage/updated";
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsageUpdate {
+    pub session_id: String,
+    pub usage: ProviderUsage,
+}
+
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsage {
